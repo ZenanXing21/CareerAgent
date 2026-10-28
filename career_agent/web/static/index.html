@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="本地运行的可追溯求职 Agent 工作台">
+  <title>Career Agent 工作台</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230c1f33'/%3E%3Cpath d='M19 22h26v25H19z' fill='none' stroke='%234cd7b5' stroke-width='5'/%3E%3Cpath d='M26 22v-5h12v5M26 34h12' fill='none' stroke='white' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="static/styles.css">
+</head>
+<body class="intake-view">
+  <div class="app-shell">
+    <header class="mobile-topbar" id="mobile-topbar">
+      <a class="mobile-brand" href="#view-profile" aria-label="Career Agent 首页">
+        <span class="brand-mark">CA</span><strong>Career Agent</strong>
+      </a>
+      <span class="mobile-view-title" id="mobile-view-title">对话建档</span>
+      <button class="icon-button mobile-nav-toggle" id="mobile-nav-toggle" type="button" aria-label="打开流程导航" aria-controls="mobile-nav-sheet" aria-expanded="false">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+      </button>
+    </header>
+
+    <aside class="sidebar app-rail">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">CA</div>
+        <span class="nav-tooltip" role="tooltip">Career Agent</span>
+      </div>
+      <nav class="steps" aria-label="使用流程">
+        <button class="step active" data-view="profile" type="button" aria-label="对话建档" aria-current="page">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v7a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 3v-3A2.5 2.5 0 0 1 4 13.5v-7Z"/></svg>
+          <span class="nav-tooltip" role="tooltip">对话建档</span>
+        </button>
+        <button class="step" data-view="jobs" type="button" aria-label="发现岗位" disabled>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4 4"/></svg>
+          <span class="nav-tooltip" role="tooltip">发现岗位</span>
+        </button>
+        <button class="step" data-view="result" type="button" aria-label="匹配分析" disabled>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3.5 14 8l4.5 2-4.5 2-2 4.5-2-4.5-4.5-2L10 8zM18.5 15l.8 1.7L21 17.5l-1.7.8-.8 1.7-.8-1.7-1.7-.8 1.7-.8z"/></svg>
+          <span class="nav-tooltip" role="tooltip">匹配分析</span>
+        </button>
+        <button class="step" data-view="interview" type="button" aria-label="模拟面试" disabled>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4V5Z"/><path d="M8 9h8M8 12h5"/></svg>
+          <span class="nav-tooltip" role="tooltip">模拟面试</span>
+        </button>
+      </nav>
+      <div class="privacy-note">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        <span class="nav-tooltip" role="tooltip">密钥仅由本地后端读取</span>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="view-eyebrow">对话建档</p>
+          <h1 id="view-title">Career Agent</h1>
+        </div>
+        <div class="system-state" id="system-state" role="status"><i></i><span>正在连接服务</span><button class="status-retry hidden" id="retry-backend" type="button">重新连接</button></div>
+      </header>
+
+      <section class="view active" id="view-profile">
+        <div class="intake-agent-layout">
+          <section class="panel intake-agent-card conversation-stage" data-conversation-started="false">
+            <div class="intake-hero" id="intake-hero">
+              <div class="agent-avatar">AI</div>
+              <div>
+                <p class="section-kicker">Career Intake Agent</p>
+                <h2>今天想从哪里开始？</h2>
+                <p>像聊天一样告诉我你的经历，我会帮你整理成真实、专业的简历。</p>
+              </div>
+            </div>
+            <div class="quick-prompts" id="intake-quick-prompts">
+              <button class="quick-prompt" type="button" data-prompt="帮我从零生成简历">从零生成简历</button>
+              <button class="quick-prompt" type="button" data-prompt="帮我修改我的简历">优化已有简历</button>
+              <button class="quick-prompt" id="intake-upload-prompt" type="button">上传简历或照片</button>
+            </div>
+            <div class="intake-scroll-region" id="intake-scroll-region">
+              <div class="intake-messages" id="intake-messages" aria-live="polite" aria-label="简历建档对话"></div>
+              <section class="intake-summary hidden" id="intake-summary">
+                <button class="intake-summary-toggle" id="intake-summary-toggle" type="button" aria-controls="intake-summary-body" aria-expanded="false">
+                  <span id="intake-summary-label">已整理资料</span>
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg>
+                </button>
+                <div class="intake-summary-body hidden" id="intake-summary-body"></div>
+              </section>
+              <section class="chat-resume-preview hidden" id="chat-resume-preview">
+                <div class="chat-preview-heading">
+                  <div><p class="section-kicker">对话内编辑</p><h3>AI 专业整理版</h3><span id="chat-save-state">修改自动保存</span></div>
+                  <div class="chat-preview-tools">
+                    <button class="secondary-button" id="open-fine-editor" type="button">精修编辑 ↗</button>
+                    <button class="download-button chat-download" data-format="docx" type="button">Word</button>
+                    <button class="download-button chat-download" data-format="pdf" type="button">PDF</button>
+                  </div>
+                </div>
+                <div class="semantic-keywords hidden" id="resume-semantic-keywords"></div>
+                <div id="chat-editor-host"></div>
+              </section>
+            </div>
+            <div class="upload-queue hidden" id="upload-queue"></div>
+            <form class="intake-composer" id="intake-chat-form">
+              <label class="attachment-button" id="intake-files-label" role="button" tabindex="0" title="上传 Word、PDF、文本、简历截图或照片" aria-label="上传简历或照片">＋<input id="intake-files" type="file" accept=".docx,.pdf,.txt,.md,image/png,image/jpeg,image/webp" multiple></label>
+              <textarea id="intake-input" rows="1" maxlength="12000" placeholder="直接说你的情况，也可以粘贴 JD 请我修改简历…"></textarea>
+              <button class="primary-button composer-send" type="submit" aria-label="发送消息">发送 ↑</button>
+            </form>
+            <div class="intake-footer">
+              <span>Agent 只整理你明确提供的事实，不会虚构经历。</span>
+              <button class="primary-button hidden" id="generate-from-chat" type="button" data-action="generate">确认生成初版简历 →</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-resume">
+        <div class="resume-workbench">
+          <aside class="editor-sidebar panel">
+            <button class="secondary-button full-width" id="back-profile" type="button">← 返回对话框</button>
+            <div class="editor-group">
+              <p class="section-kicker">简历模板</p>
+              <div class="template-list" role="radiogroup" aria-label="简历模板">
+                <button class="template-choice active" data-template="modern" type="button"><span class="template-swatch modern"></span><b>现代</b><small>清晰、通用</small></button>
+                <button class="template-choice" data-template="classic" type="button"><span class="template-swatch classic"></span><b>经典</b><small>稳重、正式</small></button>
+                <button class="template-choice" data-template="minimal" type="button"><span class="template-swatch minimal"></span><b>侧栏</b><small>分栏、清晰</small></button>
+                <div class="saved-template-list" id="saved-template-list"></div>
+                <button class="add-custom-template" id="add-custom-template" type="button"><span>＋</span> 自定义简历</button>
+              </div>
+              <label class="template-upload" id="template-upload-label" role="button" tabindex="0">上传自己的 Word 模板<input id="template-upload" type="file" accept=".docx"><span id="template-file-name">选择 .docx，最大 5MB</span></label>
+            </div>
+            <div class="editor-group">
+              <p class="section-kicker">编辑提示</p>
+              <p class="editor-help">点击简历中的文字即可修改。鼠标放到大标题上，整块内容会高亮；按住标题即可拖动模块。</p>
+              <button class="secondary-button full-width" id="toggle-polish" type="button">查看原始输入版</button>
+            </div>
+          </aside>
+
+          <div class="resume-stage">
+            <div class="resume-mobile-mode" role="tablist" aria-label="手机端简历视图">
+              <button class="active" id="resume-mobile-edit" type="button" role="tab" aria-controls="resume-edit-pane" aria-selected="true">编辑内容</button>
+              <button id="resume-mobile-preview" type="button" role="tab" aria-controls="resume-mobile-preview-pane" aria-selected="false">页面预览</button>
+            </div>
+            <div class="resume-toolbar panel">
+              <div><strong>初版简历编辑器</strong><span id="save-state">所有修改自动保存</span></div>
+              <div class="preview-tools">
+                <button class="download-button" data-format="docx" type="button">下载 Word</button>
+                <button class="download-button" data-format="pdf" type="button">下载 PDF</button>
+                <button class="primary-button" id="confirm-resume" type="button">确认并发现岗位 →</button>
+              </div>
+            </div>
+            <div id="resume-editor-home">
+              <div class="resume-canvas-wrap" id="resume-edit-pane" role="tabpanel" aria-labelledby="resume-mobile-edit">
+                <article class="resume-paper template-modern" id="resume-editor" aria-label="可编辑初版简历"></article>
+              </div>
+            </div>
+            <section class="resume-mobile-preview-pane hidden" id="resume-mobile-preview-pane" role="tabpanel" aria-labelledby="resume-mobile-preview">
+              <p>页面预览为只读模式；返回“编辑内容”可继续修改。</p>
+              <div class="resume-mobile-preview-canvas" id="resume-mobile-preview-canvas"></div>
+            </section>
+            <section class="panel resume-agent-panel" aria-labelledby="resume-agent-title">
+              <div class="agent-heading">
+                <div><p class="section-kicker">简历 Agent</p><h2 id="resume-agent-title">告诉 AI 你想怎么修改</h2></div>
+                <span>修改会直接同步到上方简历</span>
+              </div>
+              <div class="agent-messages" id="resume-agent-messages" aria-live="polite">
+                <div class="agent-message assistant">你可以补充新经历、纠正日期、改写某段内容，或者让我调整表达。例如：“补充一段 2025 年的实习经历……”</div>
+              </div>
+              <form class="agent-composer" id="resume-agent-form">
+                <textarea id="resume-agent-input" rows="3" maxlength="4000" placeholder="输入要补充的真实信息，或说明希望如何修改当前简历……" required></textarea>
+                <button class="primary-button" type="submit">发送并修改简历 ↑</button>
+              </form>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-jobs">
+        <div class="search-panel panel">
+          <div class="panel-heading search-heading">
+            <div><p class="section-kicker">真实岗位</p><h2>搜索猎聘岗位</h2></div>
+            <button class="secondary-button" id="back-resume" type="button">← 返回对话框</button>
+          </div>
+          <form id="job-search-form" class="search-form">
+            <div class="search-primary-fields">
+              <label class="search-keyword">具体岗位<input name="keyword" value="AI Agent工程师" required></label>
+              <label>城市<input name="city" value="上海" required></label>
+              <button class="secondary-button filter-toggle" id="job-filter-toggle" type="button" aria-controls="job-extra-filters" aria-expanded="false">更多筛选</button>
+              <button class="primary-button search-button" type="submit">搜索岗位</button>
+            </div>
+            <div class="job-extra-filters hidden" id="job-extra-filters">
+              <label>最低月薪<input name="salary_min" type="number" min="0" placeholder="20000"></label>
+              <label>具体公司<input name="company_name" placeholder="选填"></label>
+              <label>经验要求<input name="experience" placeholder="例如：1-3年"></label>
+            </div>
+          </form>
+          <div class="inline-error hidden" id="job-search-error" role="alert"></div>
+        </div>
+        <div class="jobs-layout">
+          <div class="jobs-column">
+            <div class="attachment-flow panel">
+              <div><strong>投递附件准备</strong><p>在首页对话完成简历修改，下载后到猎聘上传并设为默认投递简历。</p></div>
+              <a class="secondary-button" href="https://c.liepin.com/resume/edit?editType=&editId=" target="_blank" rel="noopener">前往猎聘更新附件 ↗</a>
+              <label class="attachment-confirm"><input id="attachment-ready" type="checkbox"> 我已上传并设为默认</label>
+            </div>
+            <div class="list-toolbar"><div><h2>搜索结果 <span id="job-count"></span></h2><p>确认默认附件后，可勾选多个岗位批量投递</p></div><button class="secondary-button" id="open-selected-jobs" type="button" disabled>投递已选岗位</button></div>
+            <div class="job-list" id="job-list">
+              <div class="empty-list"><p>填写上方条件，开始搜索真实岗位。</p></div>
+            </div>
+          </div>
+          <aside class="panel job-detail" id="job-detail">
+            <button class="secondary-button mobile-job-detail-back" id="mobile-job-detail-back" type="button" aria-label="返回岗位列表">← 返回岗位列表</button>
+            <div id="job-detail-content">
+              <div class="empty-detail"><div class="target-icon">◎</div><h3>选择一个岗位</h3><p>这里会显示完整职位描述与投递入口。</p></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="view-result">
+        <div class="result-header panel">
+          <button class="secondary-button" id="back-jobs">← 返回岗位列表</button>
+          <div class="result-job"><span id="result-company">—</span><h2 id="result-job-title">匹配分析</h2></div>
+          <div class="result-actions"><button class="primary-button" id="apply-job" type="button">投递</button><button class="secondary-button" id="toggle-result-detail" type="button">详情</button></div>
+        </div>
+        <details class="panel result-job-detail" id="result-job-detail"><summary>岗位详情</summary><div id="result-job-detail-body"></div></details>
+        <div class="result-flow-bar"><label><input id="open-interview-after-apply" type="checkbox" checked> 投递成功后进入模拟面试</label><span>需要修改简历时，复制 JD 后返回首页对话。</span></div>
+        <div class="result-grid">
+          <details class="panel score-card" id="score-card" open>
+            <summary><span>匹配分析</span><strong>当前简历匹配度</strong></summary>
+            <div class="result-disclosure-body"><div class="score-ring" id="score-ring"><strong id="score-value">0%</strong><span>当前简历</span></div><div class="score-groups" id="score-groups"></div><p class="score-note">按现有经历与 JD 要求确定性计算。</p></div>
+          </details>
+          <section class="panel analysis-card"><div class="panel-heading"><div><p class="section-kicker">JD 对照</p><h2>岗位要求与匹配依据</h2></div></div><div id="analysis-requirements"></div></section>
+          <section class="panel analysis-copy-card"><h3>回首页对话修改简历</h3><p>复制完整 JD，回到首页聊天框粘贴，并告诉 Agent 想突出哪些真实经历。修改后可回来重新分析。</p><div class="analysis-copy-actions"><button class="primary-button" id="copy-job-jd" type="button">复制完整 JD</button><button class="secondary-button" id="return-to-chat" type="button">返回首页对话 →</button></div></section>
+        </div>
+      </section>
+
+      <section class="view" id="view-interview">
+        <div class="result-header panel"><button class="secondary-button" id="back-tailored-result" type="button">← 返回匹配分析</button><div class="result-job"><span>投递后准备</span><h2 id="interview-job-title">模拟面试</h2></div></div>
+        <section class="panel interview-card" id="interview-card">
+          <div class="panel-heading interview-heading">
+            <div><p class="section-kicker">按当前岗位准备</p><h2>定制化面试</h2><p>围绕 JD 练习回答，并查看简历中可引用的事实与需要如实说明的差距。</p></div>
+            <button class="secondary-button" id="clear-interview-answers" type="button">清空练习记录</button>
+          </div>
+          <p class="interview-privacy">练习回答仅保存在当前浏览器，不会提交到招聘平台或模型。</p>
+          <div id="interview-content"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div class="mobile-nav-backdrop hidden" id="mobile-nav-backdrop" aria-hidden="true"></div>
+  <aside class="mobile-nav-sheet" id="mobile-nav-sheet" aria-label="使用流程导航" aria-hidden="true" hidden>
+    <div class="mobile-nav-head">
+      <div><span>Career Agent</span><strong>求职流程</strong></div>
+      <button class="icon-button" id="mobile-nav-close" type="button" aria-label="关闭流程导航">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <nav class="mobile-steps" aria-label="手机端使用流程">
+      <button class="mobile-step active" data-view="profile" type="button" aria-current="page"><span>01</span><div><strong>对话建档</strong><small>AI 逐步收集资料</small></div></button>
+      <button class="mobile-step" data-view="jobs" type="button" disabled><span>02</span><div><strong>发现岗位</strong><small>猎聘实时搜索</small></div></button>
+      <button class="mobile-step" data-view="result" type="button" disabled><span>03</span><div><strong>匹配分析</strong><small>匹配度与面试准备</small></div></button>
+      <button class="mobile-step" data-view="interview" type="button" disabled><span>04</span><div><strong>模拟面试</strong><small>投递成功后练习</small></div></button>
+    </nav>
+    <p class="mobile-privacy">密钥仅由本地后端读取，系统不会自动投递。</p>
+  </aside>
+
+  <div class="loading-overlay hidden" id="loading-overlay" aria-live="polite">
+    <div class="loader"></div><h2 id="loading-title">正在处理</h2><p id="loading-message">这可能需要几十秒，请不要关闭页面。</p>
+  </div>
+  <div class="toast hidden" id="toast" role="status"></div>
+  <div class="resume-text-toolbar hidden" id="resume-text-toolbar" role="toolbar" aria-label="文字编辑工具">
+    <button type="button" data-text-action="edit">编辑</button>
+    <button type="button" data-text-action="optimize">✦ AI 优化</button>
+    <button type="button" data-text-action="shorten">精简</button>
+    <button type="button" data-text-action="undo">撤销优化</button>
+  </div>
+  <button class="template-agent-launcher hidden" id="template-agent-launcher" type="button">模板设计</button>
+  <aside class="template-agent-popover hidden" id="template-agent-popover" aria-label="模板设计 Agent">
+    <header><div><strong>模板设计 Agent</strong><small>聊聊风格，确认后生成可复用模板</small></div><button id="minimize-template-agent" type="button" aria-label="收起模板设计">−</button><button id="close-template-agent" type="button" aria-label="关闭模板设计">×</button></header>
+    <div class="template-agent-messages" id="template-agent-messages" aria-live="polite"><div class="agent-message assistant">告诉我你希望的风格，选择设计技能后发送。我会先给方案，等你确认再生成模板。</div></div>
+    <div class="template-proposal-actions hidden" id="template-proposal-actions"><span>方案待确认</span><button class="primary-button" id="confirm-template-design" type="button">确认并生成模板</button></div>
+    <div class="template-skill-picker" id="template-skill-picker" aria-label="显式选择设计技能"></div>
+    <form id="template-agent-form"><textarea id="template-agent-input" rows="2" maxlength="3000" placeholder="描述想要的风格，或回复“确认”…" required></textarea><button class="primary-button" type="submit">发送</button></form>
+  </aside>
+  <template id="experience-template">
+    <article class="experience-card">
+      <div class="experience-card-head"><strong>经历 <span class="experience-number"></span></strong><button class="remove-experience" type="button" aria-label="删除经历">− 删除</button></div>
+      <div class="field-grid two">
+        <label>经历名称 <small>选填</small><input data-field="name" placeholder="不填可由 AI 生成"></label>
+        <label>你的角色 <small>选填</small><input data-field="role" placeholder="不填可由 AI 生成"></label>
+      </div>
+      <label class="full-field">经历时间 <small>选填，格式不限</small><input data-field="date_range" placeholder="例如：2023年9月到2024/06、去年暑假"></label>
+      <label class="full-field">经历内容 <b>*</b><textarea data-field="content" rows="4" placeholder="写清做了什么、使用了什么、真实结果是什么"></textarea></label>
+      <label class="full-field">相关技术 <small>选填</small><input data-field="technologies" placeholder="例如：Python、FastAPI、LangGraph"></label>
+    </article>
+  </template>
+  <template id="education-template">
+    <article class="education-card">
+      <div class="experience-card-head"><strong>教育经历 <span class="education-number"></span></strong><button class="remove-education" type="button" aria-label="删除教育经历">− 删除</button></div>
+      <div class="field-grid three">
+        <label>学校 <b>*</b><input data-field="school" placeholder="学校全称"></label>
+        <label>专业 <b>*</b><input data-field="major" placeholder="计算机科学与技术"></label>
+        <label>学历 <b>*</b><select data-field="degree"><option value="">请选择</option><option>大专</option><option>本科</option><option>硕士</option><option>博士</option></select></label>
+        <label>入学时间<input data-field="start_date" placeholder="2022-09"></label>
+        <label>毕业时间<input data-field="end_date" placeholder="2026-06"></label>
+        <label>相关课程<input data-field="courses" placeholder="Python, 数据结构, 数据库"></label>
+      </div>
+    </article>
+  </template>
+  <script src="static/app.js" defer></script>
+  <script src="static/intake-interactions.js" defer></script>
+  <script src="static/resume-studio.js" defer></script>
+</body>
+</html>
