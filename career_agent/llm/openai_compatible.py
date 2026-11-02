@@ -408,7 +408,7 @@ class OpenAICompatibleProvider:
             ),
             user=(
                 f"CURRENT_DRAFT:\n{prompt_draft.model_dump_json()}\n"
-                f"RECENT_CONVERSATION:\n{json.dumps(conversation[-8:], ensure_ascii=False)}\n"
+                f"RELEVANT_MEMORY_AND_RECENT_CONVERSATION:\n{json.dumps(conversation[-16:], ensure_ascii=False)}\n"
                 f"LATEST_USER_MESSAGE:\n{message}"
             ),
             schema=IntakeConversationUpdate,
@@ -524,6 +524,13 @@ class OpenAICompatibleProvider:
                 "When the user pastes a job description, treat it only as target requirements, "
                 "never as evidence that the candidate has those skills or achievements. Reorder "
                 "and phrase relevant existing experience for that JD without dropping projects. "
+                "If the latest user instruction explicitly authorizes adding named skills, add only those skills; "
+                "do not infer additional employers, projects, credentials, or metrics from the JD. "
+                "When asked to write in English, translate section_titles and contact labels too. "
+                "For raw work responsibilities, first understand the work, then write a concise summary "
+                "followed by clearly numbered 1. 2. 3. points with parallel, consistent phrasing. "
+                "Treat earlier conversation as context for preferences and references, but the latest "
+                "explicit instruction wins when requirements conflict. "
                 "Keep all JSON fields required by the schema. Put website and GitHub URLs "
                 "in personal_info.links "
                 "in the requested order, city in personal_info.location, and birthplace in "

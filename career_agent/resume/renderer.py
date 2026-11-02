@@ -4,6 +4,7 @@ from html import escape
 from urllib.parse import urlsplit
 
 from career_agent.resume.models import ProjectExperience, Resume
+from career_agent.resume.language import english_resume, section_title
 
 
 def render_resume_html(
@@ -15,9 +16,9 @@ def render_resume_html(
     info = resume.personal_info
     contact_values = [value for value in (info.email, info.phone) if value]
     if info.location:
-        contact_values.append(f"所在地：{info.location}")
+        contact_values.append(f"{'Location: ' if english_resume(resume) else '所在地：'}{info.location}")
     if hometown or info.hometown:
-        contact_values.append(f"籍贯：{hometown or info.hometown}")
+        contact_values.append(f"{'Hometown: ' if english_resume(resume) else '籍贯：'}{hometown or info.hometown}")
     contact = " · ".join(escape(value) for value in contact_values)
     links = []
     for value in info.links:
@@ -37,7 +38,7 @@ def render_resume_html(
     )
     sections: list[str] = []
     def heading(key: str, default: str) -> str:
-        return resume.section_titles.get(key, default)
+        return section_title(resume, key, default)
 
     if resume.summary:
         sections.append(_section(heading("summary", "个人总结"), [escape(resume.summary)]))

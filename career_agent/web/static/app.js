@@ -29,6 +29,55 @@ const state = {
 };
 localStorage.setItem("careerCandidateId", state.candidateId);
 
+async function renderTaskSessions() {
+  const panel = document.querySelector("#task-session-list");
+  if (!panel) return;
+  const data = await api("/api/sessions");
+  panel.replaceChildren();
+  for (const session of data.sessions) {
+    const row = document.createElement("div");
+    row.className = `task-session-row${session.id === state.candidateId ? " current" : ""}`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "task-session-open";
+    button.textContent = session.title;
+    button.title = session.id;
+    button.addEventListener("click", () => {
+      localStorage.setItem("careerCandidateId", session.id);
+      location.reload();
+    });
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "task-session-action";
+    rename.textContent = "✎";
+    rename.title = `重命名${session.title}`;
+    rename.setAttribute("aria-label", rename.title);
+    rename.addEventListener("click", async () => {
+      const title = prompt("任务名称", session.title)?.trim();
+      if (!title) return;
+      await api(`/api/sessions/${encodeURIComponent(session.id)}`, {method: "PATCH", body: JSON.stringify({title})});
+      await renderTaskSessions();
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "task-session-action danger";
+    remove.textContent = "×";
+    remove.title = `删除${session.title}`;
+    remove.setAttribute("aria-label", remove.title);
+    remove.addEventListener("click", async () => {
+      if (!confirm(`删除“${session.title}”及其中的简历、对话和记忆？此操作无法撤销。`)) return;
+      await api(`/api/sessions/${encodeURIComponent(session.id)}`, {method: "DELETE"});
+      if (session.id === state.candidateId) {
+        const next = data.sessions.find((item) => item.id !== session.id);
+        localStorage.setItem("careerCandidateId", next?.id || crypto.randomUUID());
+        location.reload();
+      } else await renderTaskSessions();
+    });
+    row.append(button, rename, remove);
+    panel.append(row);
+  }
+}
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const escapeHtml = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]);
@@ -189,7 +238,24 @@ async function restoreResumeSession() {
     $("#generate-from-chat").textContent = "确认简历并发现岗位 →";
     $("#generate-from-chat").classList.remove("hidden");
     showView("profile");
-  } catch { /* A first-time visitor has no server-side resume session yet. */ }
+  } catch {
+    // A new task has no resume yet. Explicitly restore the intake screen.
+    state.rawResume = null;
+    state.polishedResume = null;
+    state.photoAsset = null;
+    $("#intake-messages").replaceChildren();
+    $("#resume-agent-messages").replaceChildren();
+    $("#chat-resume-preview").classList.add("hidden");
+    $("#intake-hero").classList.remove("hidden");
+    $("#intake-quick-prompts").classList.remove("hidden");
+    $(".conversation-stage").classList.remove("conversation-started");
+    setStepDisabled("resume", true);
+    setStepDisabled("jobs", true);
+    document.body.classList.add("intake-view");
+    $$(".view").forEach((view) => view.classList.toggle("active", view.id === "view-profile"));
+    $("#view-eyebrow").textContent = "对话建档";
+    $("#view-title").textContent = "Career Agent";
+  }
 }
 
 $("#photo-name")?.addEventListener("click", () => $("input[name=photo]").click());
@@ -393,12 +459,22 @@ async function sendIntakeTurn({message = "", generate = false} = {}) {
   setLoading(true, generate ? "正在生成初版简历" : "正在理解并整理资料", generate ? "AI 正在分类经历、统一日期与技能表达。" : "Agent 正在提取你刚刚提供的事实并判断还缺什么。");
   try {
     if (currentResume() && message.trim() && !attachments.length && !generate) {
+      if (/(不要|别|不放|不加|去掉|删除|移除|删掉|隐藏).{0,12}(照片|头像)|(照片|头像).{0,12}(不要|别放|去掉|删除|移除|删掉|隐藏)/.test(message)) {
+        const result = await api("/api/resume/remove-photo", {method: "POST", body: JSON.stringify({candidate_id: state.candidateId})});
+        state.photoAsset = null;
+        renderIntakeMessage("assistant", result.assistant_message);
+        renderResumeEditor();
+        return;
+      }
       await saveResume();
       const edited = await api("/api/resume/agent", {method: "POST", body: JSON.stringify({
         candidate_id: state.candidateId, variant: state.previewVariant, message,
       })});
       if (state.previewVariant === "polished") state.polishedResume = edited.resume;
       else state.rawResume = edited.resume;
+      if (edited.section_order) state.sectionOrder = edited.section_order;
+      if (edited.template_id) state.templateId = edited.template_id;
+      if (Object.prototype.hasOwnProperty.call(edited, "photo_asset")) state.photoAsset = edited.photo_asset;
       renderIntakeMessage("assistant", edited.assistant_message);
       renderResumeEditor();
       $("#save-state").textContent = "AI 修改已保存";
@@ -458,9 +534,21 @@ $("#intake-chat-form").addEventListener("submit", async (event) => {
 });
 
 $("#intake-input").addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
   event.preventDefault();
   $("#intake-chat-form").requestSubmit();
+});
+
+$("#resume-agent-input")?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (event.currentTarget.value.trim()) $("#resume-agent-form").requestSubmit();
+});
+
+$("#template-agent-input")?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (event.currentTarget.value.trim()) $("#template-agent-form").requestSubmit();
 });
 
 $("#intake-input").addEventListener("input", (event) => {
@@ -711,6 +799,14 @@ $("#clear-interview-answers").addEventListener("click", () => {
 });
 
 const sectionLabels = {summary: "个人总结", education: "教育经历", work: "工作经历", internship: "实习经历", experience: "经历", campus: "校园经历", skills: "专业技能"};
+const englishResume = () => {
+  const resume = currentResume() || {};
+  const text = [resume.summary || "", ...Object.values(resume.section_titles || {}), ...(resume.work_experiences || []).map(item => item.description || "")].join(" ");
+  const latin = (text.match(/[A-Za-z]/g) || []).length;
+  const han = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  return latin > 20 && latin > han * 2;
+};
+const englishSectionLabels = {summary: "Professional Summary", education: "Education", work: "Work Experience", internship: "Internships", experience: "Projects", campus: "Campus Experience", skills: "Skills"};
 const currentResume = () => state.previewVariant === "polished" ? state.polishedResume : state.rawResume;
 const currentHometown = () => (state.previewVariant === "polished" ? state.polishedHometown : state.rawHometown) || currentResume()?.personal_info?.hometown || null;
 
@@ -738,14 +834,14 @@ function dateRange(item, path) {
 
 function sectionBlock(key, content, position, total, customTitle) {
   if (!content) return "";
-  const title = customTitle || sectionLabels[key];
+  const title = englishResume() && (!customTitle || /[\u4e00-\u9fff]/.test(customTitle)) ? englishSectionLabels[key] : (customTitle || sectionLabels[key]);
   return `<section class="editable-section" data-section="${key}"><div class="resume-section-title" title="点击文字编辑标题，按住空白处拖动模块"><span class="section-drag-handle" aria-hidden="true">⠿</span><h2>${editable(title, `section_titles.${key}`, "section-title-editable", "点击编辑栏目标题")}</h2><span class="drag-hint">点击标题编辑 · 拖动空白处排序</span><div class="resume-section-controls" aria-label="调整${escapeHtml(title)}位置"><button type="button" data-move-section="${key}" data-direction="-1" aria-label="上移${escapeHtml(title)}" ${position === 0 ? "disabled" : ""}>↑</button><button type="button" data-move-section="${key}" data-direction="1" aria-label="下移${escapeHtml(title)}" ${position === total - 1 ? "disabled" : ""}>↓</button></div></div><div class="resume-section-content">${content}</div></section>`;
 }
 
 function renderEducation(resume) {
   return (resume.educations || []).map((item, index) => {
     const path = `educations.${index}`;
-    return `<div class="resume-entry"><div class="entry-heading"><div>${editable(item.school, `${path}.school`, "entry-primary", "学校")}${editable(item.major, `${path}.major`, "entry-secondary", "专业")}${editable(item.degree, `${path}.degree`, "entry-secondary", "学历")}</div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "课程、成绩或教育说明")}</div>`;
+    return `<article class="resume-entry"><div class="entry-heading"><div class="entry-identity"><h3>${editable(item.school, `${path}.school`, "entry-primary", "学校")}</h3><div class="entry-meta">${editable(item.major, `${path}.major`, "entry-secondary", "专业")}${editable(item.degree, `${path}.degree`, "entry-secondary", "学历")}</div></div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "课程、成绩或教育说明")}</article>`;
   }).join("");
 }
 
@@ -753,7 +849,7 @@ function renderExperienceEntries(items, collection, primaryField, secondaryField
   return (items || []).map((item, index) => {
     const path = `${collection}.${index}`;
     const technologies = collection === "project_experiences" && item.technologies?.length ? `<div class="entry-technologies"><b>技术：</b>${editable(item.technologies.join("、"), `${path}.technologies`, "", "相关技术")}</div>` : "";
-    return `<div class="resume-entry"><div class="entry-heading"><div>${editable(item[primaryField], `${path}.${primaryField}`, "entry-primary", "经历名称")}${editable(item[secondaryField], `${path}.${secondaryField}`, "entry-secondary", "角色")}</div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "点击填写经历内容")}${technologies}</div>`;
+    return `<article class="resume-entry"><div class="entry-heading"><div class="entry-identity"><h3>${editable(item[primaryField], `${path}.${primaryField}`, "entry-primary", "经历名称")}</h3><div class="entry-meta">${editable(item[secondaryField], `${path}.${secondaryField}`, "entry-secondary", "角色")}</div></div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "点击填写经历内容")}${technologies}</article>`;
   }).join("");
 }
 
@@ -773,7 +869,7 @@ function renderResumeEditor() {
   const photo = state.photoAsset ? `<img class="editor-photo" src="${escapeHtml(state.photoAsset)}" alt="头像">` : "";
   const editor = $("#resume-editor");
   const visibleSections = state.sectionOrder.filter((key) => sections[key]);
-  editor.innerHTML = `<header class="resume-paper-header"><div class="identity-block"><h1>${editable(info.name, "personal_info.name", "", "姓名")}</h1><div class="contact-line">${editable(info.email, "personal_info.email", "", "邮箱")}${editable(info.phone, "personal_info.phone", "", "电话")}${info.location ? `<span>所在地：${editable(info.location, "personal_info.location", "", "现居城市")}</span>` : ""}${currentHometown() ? `<span>籍贯：${editable(currentHometown(), "__hometown__", "", "籍贯")}</span>` : ""}</div>${renderProfileLinks(info.links)}</div>${photo}</header><div class="resume-sections">${visibleSections.map((key, index) => sectionBlock(key, sections[key], index, visibleSections.length, resume.section_titles?.[key])).join("")}</div>`;
+  editor.innerHTML = `<header class="resume-paper-header"><div class="identity-block"><h1>${editable(info.name, "personal_info.name", "", "姓名")}</h1><div class="contact-line">${editable(info.email, "personal_info.email", "", "邮箱")}${editable(info.phone, "personal_info.phone", "", "电话")}${info.location ? `<span>${englishResume() ? "Location: " : "所在地："}${editable(info.location, "personal_info.location", "", "现居城市")}</span>` : ""}${currentHometown() ? `<span>${englishResume() ? "Hometown: " : "籍贯："}${editable(currentHometown(), "__hometown__", "", "籍贯")}</span>` : ""}</div>${renderProfileLinks(info.links)}</div>${photo}</header><div class="resume-sections">${visibleSections.map((key, index) => sectionBlock(key, sections[key], index, visibleSections.length, resume.section_titles?.[key])).join("")}</div>`;
   applyTemplateClass();
   bindResumeInteractions();
   renderResumeMobilePreview();
@@ -997,9 +1093,15 @@ $$("#view-resume .download-button").forEach((button) => button.addEventListener(
   if (!currentResume()) return;
   try {
     await saveResume();
+    renderResumeEditor();
     const format = button.dataset.format;
-    const path = `/api/resume/download/${state.previewVariant}/${format}?candidate_id=${encodeURIComponent(state.candidateId)}`;
-    const response = await fetch(appUrl(path));
+    const preview = $("#resume-editor").cloneNode(true);
+    preview.querySelectorAll(".resume-section-controls, .drag-hint, .section-drag-handle").forEach((node) => node.remove());
+    preview.querySelectorAll("[contenteditable]").forEach((node) => node.removeAttribute("contenteditable"));
+    const response = await fetch(appUrl(`/api/resume/export-preview/${format}`), {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({candidate_id: state.candidateId, html: preview.outerHTML}),
+    });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.detail || `下载失败（${response.status}）`);
@@ -1076,7 +1178,7 @@ function addAgentMessage(role, content) {
 
 $("#resume-agent-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const submitButton = event.submitter;
+  const submitButton = event.submitter || $("#resume-agent-form button[type=submit]");
   const input = $("#resume-agent-input");
   const message = input.value.trim();
   if (!message || !currentResume()) return;
@@ -1090,6 +1192,13 @@ $("#resume-agent-form").addEventListener("submit", async (event) => {
   submitButton.textContent = "修改中…";
   $("#resume-agent-form").setAttribute("aria-busy", "true");
   try {
+    if (/(不要|别|不放|不加|去掉|删除|移除|删掉|隐藏).{0,12}(照片|头像)|(照片|头像).{0,12}(不要|别放|去掉|删除|移除|删掉|隐藏)/.test(message)) {
+      const result = await api("/api/resume/remove-photo", {method: "POST", body: JSON.stringify({candidate_id: state.candidateId})});
+      state.photoAsset = null;
+      progress.textContent = result.assistant_message;
+      renderResumeEditor();
+      return;
+    }
     await saveResume();
     const result = await api("/api/resume/agent", {
       method: "POST",
@@ -1097,6 +1206,9 @@ $("#resume-agent-form").addEventListener("submit", async (event) => {
     });
     if (state.previewVariant === "polished") state.polishedResume = result.resume;
     else state.rawResume = result.resume;
+    if (result.section_order) state.sectionOrder = result.section_order;
+    if (result.template_id) state.templateId = result.template_id;
+    if (Object.prototype.hasOwnProperty.call(result, "photo_asset")) state.photoAsset = result.photo_asset;
     if (state.previewVariant === "polished") state.polishedHometown = result.hometown || result.resume.personal_info.hometown || null;
     else state.rawHometown = result.hometown || result.resume.personal_info.hometown || null;
     renderResumeEditor();
@@ -1192,6 +1304,17 @@ document.addEventListener("keydown", (event) => {
 });
 
 $("#retry-backend")?.addEventListener("click", checkStatus);
+$("#new-task-session")?.addEventListener("click", async () => {
+  const session = await api("/api/sessions", {method: "POST"});
+  localStorage.setItem("careerCandidateId", session.id);
+  location.reload();
+});
+$("#show-task-sessions")?.addEventListener("click", async () => {
+  const panel = $("#task-session-list");
+  panel.hidden = !panel.hidden;
+  $("#show-task-sessions").setAttribute("aria-expanded", String(!panel.hidden));
+  if (!panel.hidden) await renderTaskSessions();
+});
 window.addEventListener("online", checkStatus);
 window.addEventListener("focus", checkStatus);
 checkStatus();

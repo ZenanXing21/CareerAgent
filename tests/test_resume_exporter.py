@@ -12,6 +12,9 @@ from career_agent.resume.exporter import (
     render_resume_pdf,
 )
 from career_agent.resume.models import ProjectExperience
+from career_agent.resume.models import WorkExperience, ExperienceType
+from pypdf import PdfReader
+from career_agent.resume.visual_export import visual_pdf, visual_docx, _browser
 
 
 def _resume():  # type: ignore[no-untyped-def]
@@ -49,6 +52,32 @@ def test_pdf_export_is_a_real_pdf() -> None:
 
     assert content.startswith(b"%PDF-")
     assert len(content) > 1000
+
+
+def test_download_keeps_resume_hierarchy_and_numbered_lines() -> None:
+    resume = _resume().model_copy(update={"work_experiences": [WorkExperience(
+        id="work-1", source_text="source", experience_type=ExperienceType.WORK,
+        company="Example Co", title="Engineer", description="Summary of work.\n1. First responsibility.\n2. Second responsibility.",
+    )]})
+    document = Document(BytesIO(render_resume_docx(resume, template_id="classic")))
+    lines = [item.text for item in document.paragraphs]
+    assert lines.index("Example Co") < lines.index("Engineer")
+    assert lines.index("1. First responsibility.") + 1 == lines.index("2. Second responsibility.")
+    pdf_text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(render_resume_pdf(resume))).pages)
+    assert "1. First responsibility." in pdf_text
+    assert "2. Second responsibility." in pdf_text
+
+
+def test_visual_exports_share_browser_preview() -> None:
+    try:
+        _browser()
+    except RuntimeError:
+        pytest.skip("Chrome or Edge is not installed")
+    preview = '<div class="resume-paper layout-banner style-aurora"><header class="resume-paper-header"><h1>Sample Name</h1></header><div class="resume-sections"><h2>Experience</h2><p>1. First item</p></div></div>'
+    pdf = visual_pdf(preview, ".resume-paper{width:794px;min-height:1122px}.resume-paper-header{background:#124c68;color:white}")
+    assert "Sample Name" in PdfReader(BytesIO(pdf)).pages[0].extract_text()
+    word = Document(BytesIO(visual_docx(pdf)))
+    assert len(word.inline_shapes) == len(PdfReader(BytesIO(pdf)).pages)
 
 
 def test_preset_layouts_change_word_structure_and_keep_pdf_downloadable() -> None:

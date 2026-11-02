@@ -796,3 +796,42 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .tailored-downloads .download-button { flex: 1; }
   .loading-overlay { inset: auto 8px calc(8px + env(safe-area-inset-bottom)); width: calc(100vw - 16px); }
 }
+.task-session-list { position: absolute; z-index: 30; left: 64px; top: 70px; width: 240px; max-height: 320px; overflow: auto; padding: 8px; background: white; border: 1px solid #dce5e8; border-radius: 12px; box-shadow: 0 12px 30px #102b3a22; }
+.task-session-list[hidden] { display: none; }
+.task-session-list button { display: block; width: 100%; padding: 9px; text-align: left; border: 0; border-radius: 7px; background: transparent; cursor: pointer; }
+.task-session-list button:hover { background: #eaf4f2; }
+.app-rail .step:disabled { opacity: 1; color: #697986; cursor: default; }
+.app-rail .step:disabled svg { opacity: .78; }
+.app-rail .step:disabled:hover .nav-tooltip { opacity: 1; transform: translate(0, -50%); }
+.app-rail .step .nav-tooltip { white-space: nowrap; font-size: 13px !important; line-height: 1.4; }
+.rail-sessions { position: relative; display: grid; grid-template-columns: 1fr; gap: 4px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e1e8e8; }
+.rail-sessions > button { width: 52px; min-height: 44px; margin: 0 auto; border: 0; border-radius: 10px; color: #375466; background: transparent; font-size: 21px; cursor: pointer; }
+.rail-sessions > button:hover, .rail-sessions > button[aria-expanded="true"] { color: #086e60; background: #e9f7f2; }
+.rail-sessions .task-session-list { left: calc(100% + 13px); top: -8px; width: 290px; padding: 10px; }
+.task-session-row { display: grid; grid-template-columns: minmax(0, 1fr) 32px 32px; align-items: center; gap: 4px; border-radius: 9px; }
+.task-session-row.current { background: #e9f7f2; }
+.task-session-row .task-session-open { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; }
+.task-session-row .task-session-action { width: 32px; height: 32px; padding: 0; text-align: center; font-size: 18px; }
+.task-session-row .task-session-action.danger:hover { color: #b32635; background: #fff0f1; }
+
+/* Resume type scale: identity > section > entry > metadata > body. */
+.resume-paper { --resume-entry-size: 15px; --resume-meta-size: 12.5px; --resume-body-size: 13.5px; line-height: 1.55; }
+.resume-paper h1 { font-weight: 800; letter-spacing: -.025em; }
+.resume-paper .contact-line { font-size: 12px; line-height: 1.45; }
+.resume-paper .resume-sections { display: grid; gap: 22px; }
+.resume-paper .editable-section { margin-block: 0; }
+.resume-paper .resume-section-title { margin-bottom: 12px; }
+.resume-paper .resume-section-title h2 { font-weight: 750; line-height: 1.25; }
+.resume-paper .resume-entry { margin-bottom: 17px; break-inside: avoid; }
+.resume-paper .resume-entry:last-child { margin-bottom: 0; }
+.resume-paper .entry-heading { align-items: flex-start; gap: 16px; }
+.resume-paper .entry-heading > .entry-identity { display: block; min-width: 0; flex: 1; }
+.resume-paper .entry-identity h3 { margin: 0; color: #20303a; font-size: var(--resume-entry-size); font-weight: 750; line-height: 1.35; }
+.resume-paper .entry-identity h3 .entry-primary { font-size: inherit; font-weight: inherit; }
+.resume-paper .entry-meta { display: flex; flex-wrap: wrap; gap: 0; margin-top: 3px; color: #52616d; font-size: var(--resume-meta-size); line-height: 1.45; }
+.resume-paper .entry-meta .entry-secondary { color: inherit; font-size: inherit; font-weight: 500; }
+.resume-paper .entry-meta .entry-secondary + .entry-secondary:not(:empty)::before { content: " · "; color: #8a959d; white-space: pre; }
+.resume-paper .resume-dates { padding-top: 2px; font-size: 11.5px; line-height: 1.4; }
+.resume-paper .entry-description { margin-top: 9px; color: #34414a; font-size: var(--resume-body-size); font-weight: 400; line-height: 1.65; }
+.resume-paper .summary-line, .resume-paper .skills-line { font-size: var(--resume-body-size); font-weight: 400; line-height: 1.65; }
+.resume-paper .entry-technologies { margin-top: 7px; font-size: var(--resume-meta-size); line-height: 1.5; }

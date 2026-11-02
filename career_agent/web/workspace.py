@@ -33,6 +33,8 @@ class CandidateRecord(BaseModel):
     jobs: dict[str, Job] = Field(default_factory=dict)
     tailored_results: dict[str, TailoredJobResult] = Field(default_factory=dict)
     resume_chat: list[dict[str, str]] = Field(default_factory=list)
+    resume_memory: list[str] = Field(default_factory=list)
+    resume_revisions: list[dict] = Field(default_factory=list)
     omitted_fields: list[str] = Field(default_factory=list)
     designed_template: DesignedResumeTemplate | None = None
     designed_templates: list[SavedResumeTemplate] = Field(default_factory=list)
@@ -57,6 +59,7 @@ class IntakeRecord(BaseModel):
 class WorkspaceRecords(BaseModel):
     candidates: dict[str, CandidateRecord] = Field(default_factory=dict)
     intakes: dict[str, IntakeRecord] = Field(default_factory=dict)
+    sessions_meta: dict[str, str] = Field(default_factory=dict)
 
 
 def candidate_from_record(record: CandidateRecord, factory):
@@ -95,7 +98,7 @@ class WorkspaceStore:
             return WorkspaceRecords()
         return WorkspaceRecords.model_validate_json(self.path.read_text(encoding="utf-8"))
 
-    def snapshot(self, candidates: dict, intakes: dict) -> str:
+    def snapshot(self, candidates: dict, intakes: dict, sessions_meta: dict[str, str] | None = None) -> str:
         records = {}
         for key, candidate in candidates.items():
             values = {
@@ -113,7 +116,7 @@ class WorkspaceStore:
             key: IntakeRecord(**{name: getattr(value, name) for name in IntakeRecord.model_fields})
             for key, value in intakes.items()
         }
-        return WorkspaceRecords(candidates=records, intakes=intake_records).model_dump_json()
+        return WorkspaceRecords(candidates=records, intakes=intake_records, sessions_meta=sessions_meta or {}).model_dump_json()
 
     def write(self, data: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

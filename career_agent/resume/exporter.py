@@ -127,13 +127,17 @@ def render_resume_docx(
         heading_paragraph.add_run(_safe_text(heading))
         _word_heading_rule(heading_paragraph, theme.accent)
         for entry_title, description in entries:
-            paragraph = content.add_paragraph()
-            paragraph.paragraph_format.space_after = Pt(2)
-            paragraph.add_run(_safe_text(entry_title)).bold = True
+            for index, title_line in enumerate(entry_title.splitlines()):
+                paragraph = content.add_paragraph()
+                paragraph.paragraph_format.space_after = Pt(2)
+                paragraph.add_run(_safe_text(title_line)).bold = index == 0
             if description:
-                detail = content.add_paragraph(_safe_text(description))
-                detail.paragraph_format.left_indent = Inches(0.08)
-                detail.paragraph_format.space_after = Pt(7 if not theme.compact else 4)
+                for line in description.splitlines():
+                    if not line.strip():
+                        continue
+                    detail = content.add_paragraph(_safe_text(line))
+                    detail.paragraph_format.left_indent = Inches(0.08)
+                    detail.paragraph_format.space_after = Pt(3 if not theme.compact else 2)
 
     output = BytesIO()
     document.save(output)
@@ -244,9 +248,11 @@ def render_resume_pdf(
     for heading, entries in _resume_sections(resume, section_order, section_overrides):
         story.append(Paragraph(escape(_safe_text(heading)), heading_style))
         for entry_title, description in entries:
-            story.append(Paragraph(escape(_safe_text(entry_title)), entry_style))
+            story.append(Paragraph("<br/>".join(escape(_safe_text(line)) for line in entry_title.splitlines()), entry_style))
             if description:
-                story.append(Paragraph(escape(_safe_text(description)), body_style))
+                for line in description.splitlines():
+                    if line.strip():
+                        story.append(Paragraph(escape(_safe_text(line)), body_style))
 
     def page_design(canvas, doc):
         canvas.saveState()
@@ -285,10 +291,15 @@ def render_resume_pdf(
         elif theme.layout == "banner" and doc.page == 1:
             if visual_style == "aurora":
                 colors = ("#0B1E3C", "#103C5C", "#155C70", "#178F8B")
-                band = A4[0] / len(colors)
-                for index, color in enumerate(colors):
-                    canvas.setFillColor(HexColor(color))
-                    canvas.rect(index * band, A4[1] - 44 * mm, band + 1, 44 * mm, fill=1, stroke=0)
+                stops = [tuple(int(color[index:index + 2], 16) for index in (1, 3, 5)) for color in colors]
+                strips = 120
+                for index in range(strips):
+                    position = index / (strips - 1) * (len(stops) - 1)
+                    left = min(int(position), len(stops) - 2)
+                    fraction = position - left
+                    rgb = [((1 - fraction) * stops[left][channel] + fraction * stops[left + 1][channel]) / 255 for channel in range(3)]
+                    canvas.setFillColorRGB(*rgb)
+                    canvas.rect(index * A4[0] / strips, A4[1] - 44 * mm, A4[0] / strips + 1, 44 * mm, fill=1, stroke=0)
                 canvas.setStrokeColor(HexColor("#80D9D7"))
                 canvas.circle(A4[0] - 18 * mm, A4[1] - 13 * mm, 28 * mm, fill=0, stroke=1)
                 canvas.setFillColor(HexColor("#8CEBDB"))
@@ -502,12 +513,13 @@ def _word_heading_rule(paragraph: object, color: str) -> None:
 
 
 def _contact_text(resume: Resume, hometown: str | None) -> str:
+    from career_agent.resume.language import english_resume
     info = resume.personal_info
     values = [value for value in (info.email, info.phone) if value]
     if info.location:
-        values.append(f"所在地：{info.location}")
+        values.append(f"{'Location: ' if english_resume(resume) else '所在地：'}{info.location}")
     if hometown or info.hometown:
-        values.append(f"籍贯：{hometown or info.hometown}")
+        values.append(f"{'Hometown: ' if english_resume(resume) else '籍贯：'}{hometown or info.hometown}")
     return " · ".join(values)
 
 
@@ -531,16 +543,10 @@ def _resume_sections(
             "教育经历",
             [
                 (
-                    " · ".join(
-                        value
-                        for value in (
-                            item.school,
-                            item.major,
-                            item.degree,
-                            _dates(item.start_date, item.end_date),
-                        )
-                        if value
-                    ),
+                    "\n".join(part for part in (
+                        item.school,
+                        " · ".join(value for value in (item.major, item.degree, _dates(item.start_date, item.end_date)) if value),
+                    ) if part),
                     item.description or "",
                 )
                 for item in resume.educations
@@ -555,15 +561,13 @@ def _resume_sections(
         if items:
             entries = []
             for item in items:
-                title = " · ".join(
-                    value
-                    for value in (
-                        getattr(item, name_field) or heading,
+                title = "\n".join(part for part in (
+                    getattr(item, name_field) or heading,
+                    " · ".join(value for value in (
                         getattr(item, role_field) or "",
                         _dates(item.start_date, item.end_date),
-                    )
-                    if value
-                )
+                    ) if value),
+                ) if part)
                 description = item.description or ""
                 if key == "experience" and item.technologies:
                     technologies = "相关技术：" + "、".join(item.technologies)
@@ -601,14 +605,15 @@ def _resume_sections(
         else:
             entries = [(value, "") for value in values]
         sections[key] = (heading, entries)
+    from career_agent.resume.language import section_title
     for key in normalize_section_order(section_order or []):
         if key in sections:
             heading, entries = sections[key]
-            yield resume.section_titles.get(key, heading), entries
+            yield section_title(resume, key, heading), entries
 
 
 def _dates(start: str | None, end: str | None) -> str:
-    return " 至 ".join(value for value in (start, end) if value)
+    return " — ".join(value for value in (start, end) if value)
 
 
 def _photo_bytes(photo_asset: str | None) -> BytesIO | None:
