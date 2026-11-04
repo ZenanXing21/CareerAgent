@@ -60,6 +60,7 @@ class WorkspaceRecords(BaseModel):
     candidates: dict[str, CandidateRecord] = Field(default_factory=dict)
     intakes: dict[str, IntakeRecord] = Field(default_factory=dict)
     sessions_meta: dict[str, str] = Field(default_factory=dict)
+    session_owners: dict[str, str] = Field(default_factory=dict)
 
 
 def candidate_from_record(record: CandidateRecord, factory):
@@ -98,7 +99,8 @@ class WorkspaceStore:
             return WorkspaceRecords()
         return WorkspaceRecords.model_validate_json(self.path.read_text(encoding="utf-8"))
 
-    def snapshot(self, candidates: dict, intakes: dict, sessions_meta: dict[str, str] | None = None) -> str:
+    def snapshot(self, candidates: dict, intakes: dict, sessions_meta: dict[str, str] | None = None,
+                 session_owners: dict[str, str] | None = None) -> str:
         records = {}
         for key, candidate in candidates.items():
             values = {
@@ -116,7 +118,9 @@ class WorkspaceStore:
             key: IntakeRecord(**{name: getattr(value, name) for name in IntakeRecord.model_fields})
             for key, value in intakes.items()
         }
-        return WorkspaceRecords(candidates=records, intakes=intake_records, sessions_meta=sessions_meta or {}).model_dump_json()
+        return WorkspaceRecords(candidates=records, intakes=intake_records,
+                                sessions_meta=sessions_meta or {},
+                                session_owners=session_owners or {}).model_dump_json()
 
     def write(self, data: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

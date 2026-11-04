@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -463,18 +464,20 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         response.headers["Cache-Control"] = "no-store"
         if store and request.method in {"POST", "PATCH", "DELETE"} and response.status_code < 400:
             async with save_lock:
-                data = store.snapshot(sessions, intake_sessions, sessions_meta)
+                data = store.snapshot(sessions, intake_sessions, sessions_meta, session_owners)
                 await asyncio.to_thread(store.write, data)
         return response
 
     sessions: dict[str, CandidateSession] = {}
     intake_sessions: dict[str, IntakeConversationSession] = {}
     sessions_meta: dict[str, str] = {}
+    session_owners: dict[str, str] = {}
     store = WorkspaceStore(state_file) if state_file else None
     save_lock = asyncio.Lock()
     if store:
         saved = store.load()
         sessions_meta.update(saved.sessions_meta)
+        session_owners.update(saved.session_owners)
         sessions.update(
             {
                 key: candidate_from_record(value, CandidateSession)
@@ -490,6 +493,36 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
     service: CareerProductService | None = None
     source: LiepinMCPAdapter | None = None
     applicator: LiepinCLIAdapter | None = None
+
+    @application.middleware("http")
+    async def isolate_workspaces(request: Request, call_next: Any) -> Response:
+        path = request.url.path
+        if not path.startswith("/api/") or path in {"/api/status", "/api/design/skills"}:
+            return await call_next(request)
+        secret = request.headers.get("x-workspace-key", "")
+        if len(secret) < 32:
+            return Response(status_code=403, content="Workspace key required")
+        owner = hashlib.sha256(secret.encode()).hexdigest()
+        candidate_id = request.query_params.get("candidate_id")
+        if path.startswith("/api/sessions/"):
+            candidate_id = path.split("/")[3]
+        elif request.method in {"POST", "PATCH"} and path != "/api/sessions":
+            try:
+                body = await request.json()
+                candidate_id = body.get("candidate_id") if isinstance(body, dict) else None
+            except (ValueError, UnicodeDecodeError):
+                pass
+        if candidate_id:
+            current = session_owners.get(candidate_id)
+            exists = candidate_id in sessions or candidate_id in intake_sessions or candidate_id in sessions_meta
+            if current is None and exists:
+                return Response(status_code=403, content="Legacy workspace is locked")
+            if current is not None and not hmac.compare_digest(current, owner):
+                return Response(status_code=403, content="Workspace is private")
+            if current is None and path in {"/api/intake", "/api/intake/chat", "/api/workspace/restore"}:
+                session_owners[candidate_id] = owner
+        request.state.workspace_owner = owner
+        return await call_next(request)
 
     def get_dependencies() -> tuple[CareerProductService, LiepinMCPAdapter]:
         nonlocal service, source
@@ -619,15 +652,17 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         return HTMLResponse(markup)
 
     @application.get("/api/sessions")
-    async def list_task_sessions() -> dict[str, object]:
+    async def list_task_sessions(request: Request) -> dict[str, object]:
         ids = list(dict.fromkeys([*sessions_meta, *sessions, *intake_sessions]))
         return {"sessions": [{"id": item, "title": sessions_meta.get(item, "简历任务"),
-                              "has_resume": item in sessions} for item in ids]}
+                              "has_resume": item in sessions} for item in ids
+                             if session_owners.get(item) == request.state.workspace_owner]}
 
     @application.post("/api/sessions")
-    async def create_task_session() -> dict[str, str]:
+    async def create_task_session(request: Request) -> dict[str, str]:
         session_id = str(uuid4())
         sessions_meta[session_id] = "新任务"
+        session_owners[session_id] = request.state.workspace_owner
         return {"id": session_id, "title": "新任务"}
 
     @application.patch("/api/sessions/{session_id}")
@@ -642,6 +677,7 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         if session_id not in sessions_meta and session_id not in sessions and session_id not in intake_sessions:
             raise HTTPException(status_code=404, detail="找不到该任务会话")
         sessions_meta.pop(session_id, None)
+        session_owners.pop(session_id, None)
         sessions.pop(session_id, None)
         intake_sessions.pop(session_id, None)
         return {"deleted": True}

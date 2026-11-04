@@ -1,3 +1,10 @@
+const workspaceKey = localStorage.getItem("careerWorkspaceKey") || `${crypto.randomUUID()}${crypto.randomUUID()}`;
+if (!localStorage.getItem("careerWorkspaceKey")) {
+  localStorage.setItem("careerWorkspaceKey", workspaceKey);
+  localStorage.removeItem("careerCandidateId");
+}
+const workspaceName = localStorage.getItem("careerWorkspaceName") || (prompt("请输入用户名，用于标记此设备上的简历空间", "访客")?.trim() || "访客");
+localStorage.setItem("careerWorkspaceName", workspaceName);
 const state = {
   candidateId: localStorage.getItem("careerCandidateId") || crypto.randomUUID(),
   photoAsset: null,
@@ -177,7 +184,7 @@ function toast(message) {
 async function api(path, options = {}) {
   const response = await fetch(appUrl(path), {
     cache: "no-store",
-    headers: {"Content-Type": "application/json", ...(options.headers || {})},
+    headers: {"Content-Type": "application/json", "X-Workspace-Key": workspaceKey, ...(options.headers || {})},
     ...options,
   });
   const data = await response.json().catch(() => ({}));
@@ -1099,7 +1106,7 @@ $$("#view-resume .download-button").forEach((button) => button.addEventListener(
     preview.querySelectorAll(".resume-section-controls, .drag-hint, .section-drag-handle").forEach((node) => node.remove());
     preview.querySelectorAll("[contenteditable]").forEach((node) => node.removeAttribute("contenteditable"));
     const response = await fetch(appUrl(`/api/resume/export-preview/${format}`), {
-      method: "POST", headers: {"Content-Type": "application/json"},
+      method: "POST", headers: {"Content-Type": "application/json", "X-Workspace-Key": workspaceKey},
       body: JSON.stringify({candidate_id: state.candidateId, html: preview.outerHTML}),
     });
     if (!response.ok) {
