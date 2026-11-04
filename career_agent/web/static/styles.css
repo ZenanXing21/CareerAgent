@@ -803,7 +803,21 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .app-rail .step:disabled { opacity: 1; color: #697986; cursor: default; }
 .app-rail .step:disabled svg { opacity: .78; }
 .app-rail .step:disabled:hover .nav-tooltip { opacity: 1; transform: translate(0, -50%); }
-.app-rail .step .nav-tooltip { white-space: nowrap; font-size: 13px !important; line-height: 1.4; }
+.app-rail .step > .nav-tooltip {
+  display: block;
+  width: max-content;
+  height: auto;
+  min-width: max-content;
+  max-width: 190px;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 10px;
+  white-space: nowrap;
+  background: #0b1c2b;
+  color: #fff !important;
+  font-size: 13px !important;
+  line-height: 1.4;
+}
 .rail-sessions { position: relative; display: grid; grid-template-columns: 1fr; gap: 4px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e1e8e8; }
 .rail-sessions > button { width: 52px; min-height: 44px; margin: 0 auto; border: 0; border-radius: 10px; color: #375466; background: transparent; font-size: 21px; cursor: pointer; }
 .rail-sessions > button:hover, .rail-sessions > button[aria-expanded="true"] { color: #086e60; background: #e9f7f2; }
