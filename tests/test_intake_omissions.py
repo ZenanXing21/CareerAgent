@@ -112,6 +112,7 @@ def test_contextual_refusal_advances_and_generated_resume_can_be_confirmed(
     monkeypatch.setattr(web.LiepinMCPAdapter, "from_env", lambda: object())
     monkeypatch.setattr(CareerProductService, "create_ai_initial_resume", polished)
     client = TestClient(create_app())
+    client.headers.update({"X-Workspace-Key": "intake-omissions-test-workspace-key-123456"})
     candidate = "omissions-test"
     initial = client.post(
         "/api/intake/chat", json={"candidate_id": candidate, "message": "这是我的资料"}
@@ -156,6 +157,7 @@ def test_private_resume_can_be_confirmed_and_downloaded_without_missing_contacts
     monkeypatch.setattr(web.LiepinMCPAdapter, "from_env", lambda: object())
     monkeypatch.setattr(CareerProductService, "create_ai_initial_resume", polished)
     client = TestClient(create_app())
+    client.headers.update({"X-Workspace-Key": "private-profile-test-workspace-key-123456"})
     draft = CandidateIntakeDraft(
         candidate_id="private-profile", skills=["Python"],
         omitted_fields=["name", "email", "phone", "education"],

@@ -646,6 +646,8 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         ):
             return
         previous = sessions.get(draft.candidate_id)
+        if previous and (previous.edit_revision > 0 or previous.resume_revisions):
+            return
         generated = CandidateSession(
             raw_resume=result.resume,
             display_resume=result.display_resume,
@@ -1563,7 +1565,7 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         return {"uploaded": True, "filename": request.filename, "theme": theme}
 
     @application.post("/api/workspace/restore")
-    async def restore_workspace(payload: dict[str, Any]) -> dict[str, object]:
+    async def restore_workspace(payload: dict[str, Any], request: Request) -> dict[str, object]:
         try:
             records = WorkspaceRecords.model_validate_json(json.dumps(payload))
             if len(records.candidates) + len(records.intakes) > 10:
@@ -1572,10 +1574,12 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             for key, record in records.candidates.items():
                 if key not in sessions:
                     sessions[key] = candidate_from_record(record, CandidateSession)
+                    session_owners[key] = request.state.workspace_owner
                     restored.append(key)
             for key, record in records.intakes.items():
                 if key not in intake_sessions:
                     intake_sessions[key] = intake_from_record(record, IntakeConversationSession)
+                    session_owners[key] = request.state.workspace_owner
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="会话备份格式无效") from exc
         return {"restored": restored}

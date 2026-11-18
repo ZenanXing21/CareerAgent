@@ -1,4 +1,5 @@
 import base64
+from hashlib import sha256
 from io import BytesIO
 
 from docx import Document
@@ -93,9 +94,10 @@ def test_resume_agent_contact_changes_are_visible_and_reported(tmp_path, monkeyp
         description="参与校园活动",
     )]})
     state_file = tmp_path / "workspace.json"
+    key = "profile-edits-test-workspace-key-123456"
     WorkspaceStore(state_file).write(WorkspaceRecords(candidates={
         "profile-edit": CandidateRecord(raw_resume=source, display_resume=source)
-    }).model_dump_json())
+    }, session_owners={"profile-edit": sha256(key.encode()).hexdigest()}).model_dump_json())
 
     class EditingProvider:
         async def edit_resume(self, *, resume, instruction, conversation):
@@ -104,6 +106,7 @@ def test_resume_agent_contact_changes_are_visible_and_reported(tmp_path, monkeyp
     monkeypatch.setattr(OpenAICompatibleProvider, "from_env", lambda: EditingProvider())
     monkeypatch.setattr(LiepinMCPAdapter, "from_env", lambda: object())
     client = TestClient(create_app(state_file=state_file))
+    client.headers.update({"X-Workspace-Key": key})
     response = client.post("/api/resume/agent", json={
         "candidate_id": "profile-edit",
         "message": "个人网站 https://example.com，GitHub https://github.com/example，"

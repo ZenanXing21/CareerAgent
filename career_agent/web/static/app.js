@@ -1120,9 +1120,8 @@ function updateEditorValue(node, shouldSave = true) {
     else state.rawHometown = value || null;
     resume.personal_info.hometown = value || null;
   } else if (path.startsWith("personal_info.links.")) {
-    const index = Number(path.split(".").at(-1));
-    resume.personal_info.links[index] = value;
-    resume.personal_info.links = resume.personal_info.links.filter(Boolean);
+    resume.personal_info.links = $$("#resume-editor .portfolio-links .editable[data-path^='personal_info.links.']")
+      .map((link) => link.textContent.replace(/\u00a0/g, " ").trim()).filter(Boolean);
   } else if (path === "__skills__") {
     const names = value.split(/[,，、;；|\n·]+/).map((item) => item.trim()).filter(Boolean);
     resume.skills = names.map((name) => ({name, source_text: `技能：${names.join("、")}`, category: null, proficiency: null}));
@@ -1294,7 +1293,9 @@ window.addEventListener("pagehide", () => {
   if (!currentResume()) return;
   const before = JSON.stringify(currentResume());
   commitAllResumeFields();
-  if (JSON.stringify(currentResume()) !== before || resumeSaveTimer) {
+  const changed = JSON.stringify(currentResume()) !== before;
+  if (changed) resumeEditVersion += 1;
+  if (changed || resumeSaveTimer) {
     try { localStorage.setItem(resumeDraftKey(), JSON.stringify(resumePayload())); }
     catch { /* The server save remains the primary copy. */ }
   }

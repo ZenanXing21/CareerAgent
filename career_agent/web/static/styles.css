@@ -854,8 +854,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .resume-paper .resume-section-title { margin-bottom: 12px; }
 .resume-paper .resume-section-title h2 { font-weight: 750; line-height: 1.25; }
 .resume-paper .resume-entry { margin-bottom: 23px; break-inside: avoid; }
-.resume-entry-remove { display: block; margin: 7px 0 0 auto; padding: 3px 8px; border: 1px solid #d8e3e5; border-radius: 6px; background: #fff; color: #667788; font-size: 11px; cursor: pointer; }
-.resume-entry-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.resume-entry-remove { margin: 0; padding: 3px 8px; border: 1px solid #d8e3e5; border-radius: 6px; background: #fff; color: #667788; font-size: 11px; cursor: pointer; }
+.resume-entry-actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 6px; }
 .resume-entry-remove:hover { color: #b63535; border-color: #e8b4b4; }
 .resume-paper .resume-entry:last-child { margin-bottom: 0; }
 .resume-paper .entry-heading { align-items: flex-start; gap: 16px; }

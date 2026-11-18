@@ -95,6 +95,14 @@ def preserve_unrequested_resume_facts(
             for item in before for key in ("company", "school", "organization", "name", "title")
         )
         targeted_removal = requested_removal(labels) or (mentions_entry and re.search(removal, instruction))
+        whole_section_removal = bool(
+            not after and requested_removal(labels)
+            and re.search(r"教育经历|工作经历|实习经历|项目经历|校园经历|社会实践经历", instruction)
+            and not re.search(r"其中|一条|一段|某条|某段|这条|这段", instruction)
+        )
+        if whole_section_removal:
+            resume_updates[field] = []
+            continue
         if (before and not after and not targeted_removal) or (
             not broad_edit and not re.search(labels, instruction, re.I) and not mentions_entry
         ):

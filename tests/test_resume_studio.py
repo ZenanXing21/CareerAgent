@@ -92,6 +92,7 @@ def test_workspace_survives_restart_and_design_requires_explicit_skill(tmp_path,
     path = tmp_path / "workspace.json"
     resume = Resume(resume_id="test", version="v1", raw_text="做了数据清洗", summary="做了数据清洗")
     with TestClient(create_app(state_file=path)) as client:
+        client.headers.update({"X-Workspace-Key": "resume-studio-test-workspace-key-123456"})
         payload = {
             "candidates": {
                 "test": {
@@ -146,6 +147,7 @@ def test_workspace_survives_restart_and_design_requires_explicit_skill(tmp_path,
             == 422
         )
     with TestClient(create_app(state_file=path)) as client:
+        client.headers.update({"X-Workspace-Key": "resume-studio-test-workspace-key-123456"})
         current = client.get("/api/resume/current?candidate_id=test").json()
         assert current["display_resume"]["summary"] == "参与数据清洗与整理。"
         assert current["raw_resume"]["summary"] == "做了数据清洗"
@@ -199,6 +201,7 @@ def test_workspace_survives_restart_and_design_requires_explicit_skill(tmp_path,
 def test_old_single_template_is_retained_as_a_reusable_preset() -> None:
     resume = Resume(resume_id="legacy", version="v1", raw_text="原始事实")
     with TestClient(create_app()) as client:
+        client.headers.update({"X-Workspace-Key": "legacy-template-test-workspace-key-123456"})
         response = client.post(
             "/api/workspace/restore",
             json={
