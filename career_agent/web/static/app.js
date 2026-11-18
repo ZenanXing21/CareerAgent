@@ -162,6 +162,12 @@ function syncShellState(viewName) {
 }
 
 function showView(name) {
+  if (state.editorMode === "detail" && name !== "resume" && currentResume()) {
+    const before = JSON.stringify(currentResume());
+    commitAllResumeFields();
+    if (JSON.stringify(currentResume()) !== before) scheduleResumeSave();
+    saveResume().catch(() => {});
+  }
   if (name === "profile" || name === "resume") window.CareerResumeStudio?.mount(name === "resume" ? "detail" : "chat");
   document.body.classList.toggle("intake-view", name === "profile");
   $$(".view").forEach((view) => view.classList.toggle("active", view.id === `view-${name}`));
@@ -1228,6 +1234,15 @@ $("#resume-section-spacing")?.addEventListener("input", (event) => {
 let resumeSaveTimer;
 let resumeSavePromise = Promise.resolve();
 let resumeEditVersion = 0;
+window.addEventListener("pagehide", () => {
+  if (!currentResume()) return;
+  const before = JSON.stringify(currentResume());
+  commitAllResumeFields();
+  if (JSON.stringify(currentResume()) !== before || resumeSaveTimer) {
+    try { localStorage.setItem(resumeDraftKey(), JSON.stringify(resumePayload())); }
+    catch { /* The server save remains the primary copy. */ }
+  }
+});
 function scheduleResumeSave() {
   resumeEditVersion += 1;
   try { localStorage.setItem(resumeDraftKey(), JSON.stringify(resumePayload())); } catch { /* Continue saving to the server. */ }
