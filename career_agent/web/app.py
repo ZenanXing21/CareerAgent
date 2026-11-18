@@ -56,6 +56,7 @@ from career_agent.resume.exporter import (
     section_overrides_with_suggestions,
 )
 from career_agent.resume.inspector import inspect_resume
+from career_agent.resume.inline_formatting import normalize_resume_formatting, preserve_source_emphasis
 from career_agent.resume.models import Resume, Skill
 from career_agent.resume.talent_pool import add_fact, collect_resume, collect_user_message, delete_fact, relevant_facts
 from career_agent.resume.studio import (
@@ -293,7 +294,11 @@ def _decode_attachment(attachment: IntakeAttachment) -> tuple[str | None, str | 
                 for segment in paragraph.iter_inner_content():
                     value = segment.text
                     if value:
-                        parts.append(f"**{value}**" if getattr(segment, "bold", False) and value.strip() else value)
+                        if value.strip() and getattr(segment, "underline", False):
+                            value = f"__{value}__"
+                        if value.strip() and getattr(segment, "bold", False):
+                            value = f"**{value}**"
+                        parts.append(value)
                 text = "".join(parts).strip()
                 if not text:
                     return ""
@@ -672,6 +677,14 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
                 "edit_revision",
             ):
                 setattr(generated, name, getattr(previous, name))
+        generated.raw_resume, generated.field_styles = normalize_resume_formatting(
+            generated.raw_resume, generated.field_styles
+        )
+        generated.display_resume, generated.field_styles = normalize_resume_formatting(
+            generated.display_resume, generated.field_styles
+        )
+        source_text = draft.build_resume().raw_text
+        generated.field_styles = preserve_source_emphasis(generated.display_resume, source_text, generated.field_styles)
         sessions[draft.candidate_id] = generated
 
     def apply_editor_update(
@@ -684,7 +697,10 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             select_design(candidate, request.design_id)
         if request.template_id == "designed" and candidate.designed_template is None:
             raise HTTPException(status_code=400, detail="请先生成自定义模板")
-        edited = confirm_user_edited_resume(Resume.model_validate(request.resume, strict=False))
+        incoming, candidate.field_styles = normalize_resume_formatting(
+            Resume.model_validate(request.resume, strict=False), request.field_styles
+        )
+        edited = confirm_user_edited_resume(incoming)
         candidate.edit_revision += 1
         hometown = request.hometown or edited.personal_info.hometown
         edited = edited.model_copy(
@@ -703,8 +719,9 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         candidate.field_styles = {
             path: {"size": max(8, min(24, float(style["size"]))) if isinstance(style.get("size"), (int, float)) else None,
                    "bold": bool(style.get("bold", False)), "underline": bool(style.get("underline", False)),
-                   "emphasis": [term[:80] for term in style.get("emphasis", [])[:30] if isinstance(term, str) and len(term) >= 2] if isinstance(style.get("emphasis", []), list) else []}
-            for path, style in request.field_styles.items()
+                   "emphasis": [term[:80] for term in style.get("emphasis", [])[:30] if isinstance(term, str) and len(term) >= 1] if isinstance(style.get("emphasis", []), list) else [],
+                   "underline_terms": [term[:80] for term in style.get("underline_terms", [])[:30] if isinstance(term, str) and len(term) >= 1] if isinstance(style.get("underline_terms", []), list) else []}
+            for path, style in candidate.field_styles.items()
             if isinstance(style, dict) and re.fullmatch(r"(?:summary|__skills__|section_titles\.[a-z]+|personal_info\.[a-z]+|(?:educations|work_experiences|internships|project_experiences|campus_experiences)\.\d+\.[a-z_]+)", path)
         }
         candidate.confirmed = False
@@ -798,7 +815,12 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
                 }
             )
         store_generated_resume(draft, result)
-        return result.model_dump(mode="json")
+        payload = result.model_dump(mode="json")
+        if candidate := sessions.get(draft.candidate_id):
+            payload.update(resume=candidate.raw_resume.model_dump(mode="json"),
+                           display_resume=candidate.display_resume.model_dump(mode="json"),
+                           field_styles=candidate.field_styles)
+        return payload
 
     @application.post("/api/intake/chat")
     async def conversational_intake(request: IntakeChatRequest, http_request: Request) -> dict[str, object]:
@@ -932,6 +954,10 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
                 if result.resume:
                     collect_resume(pool, result.resume, request.candidate_id)
             payload = result.model_dump(mode="json")
+            if preview_ready and (candidate := sessions.get(request.candidate_id)):
+                payload.update(resume=candidate.raw_resume.model_dump(mode="json"),
+                               display_resume=candidate.display_resume.model_dump(mode="json"),
+                               field_styles=candidate.field_styles)
             payload.update(
                 {
                     "generated": bool(request.generate and preview_ready),
@@ -1332,6 +1358,7 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             or edited.personal_info.hometown
             or (candidate.raw_hometown if request.variant == "raw" else candidate.polished_hometown)
         )
+        edited, candidate.field_styles = normalize_resume_formatting(edited, candidate.field_styles)
         edited = confirm_user_edited_resume(
             edited.model_copy(
                 update={
@@ -1412,6 +1439,7 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         return {
             "assistant_message": assistant_message,
             "resume": edited.model_dump(mode="json"),
+            "field_styles": candidate.field_styles,
             "hometown": hometown,
             "changed_sections": changes,
         }
@@ -1461,6 +1489,8 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
     @application.get("/api/resume/current")
     async def current_resume(candidate_id: str) -> dict[str, object]:
         candidate = get_session(candidate_id)
+        candidate.raw_resume, candidate.field_styles = normalize_resume_formatting(candidate.raw_resume, candidate.field_styles)
+        candidate.display_resume, candidate.field_styles = normalize_resume_formatting(candidate.display_resume, candidate.field_styles)
         custom_theme = (
             inspect_docx_template(candidate.custom_template)
             if candidate.custom_template is not None

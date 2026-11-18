@@ -143,14 +143,24 @@ def render_resume_docx(
             for index, title_line in enumerate(entry_title.splitlines()):
                 paragraph = content.add_paragraph()
                 paragraph.paragraph_format.space_after = Pt(2)
-                run = paragraph.add_run(_safe_text(title_line))
-                run.bold = index == 0
-                run.font.size = Pt(11.25 if index == 0 else 9.4)
                 style_path = "summary" if section_key == "summary" else "__skills__" if section_key == "skills" else f"{collection}.{entry_index}.{primary if index == 0 else secondary}" if collection and (primary if index == 0 else secondary) else None
-                if style_path:
-                    _style_word_run(run, field_styles, style_path)
-                if index:
-                    run.font.color.rgb = RGBColor.from_string("52616D")
+                import re
+                style = (field_styles or {}).get(style_path or "", {})
+                bold_terms = style.get("emphasis", [])
+                underline_terms = style.get("underline_terms", [])
+                marked = sorted(set([*bold_terms, *underline_terms]), key=len, reverse=True)
+                pieces = re.split("(" + "|".join(re.escape(term) for term in marked) + ")", title_line, flags=re.I) if marked else [title_line]
+                for piece in pieces:
+                    if not piece:
+                        continue
+                    run = paragraph.add_run(_safe_text(piece))
+                    run.bold = (index == 0 and section_key not in {"summary", "skills"}) or any(piece.casefold() == term.casefold() for term in bold_terms)
+                    run.underline = any(piece.casefold() == term.casefold() for term in underline_terms)
+                    run.font.size = Pt(11.25 if index == 0 else 9.4)
+                    if style_path:
+                        _style_word_run(run, field_styles, style_path)
+                    if index:
+                        run.font.color.rgb = RGBColor.from_string("52616D")
             if description:
                 for line in description.splitlines():
                     if not line.strip():
@@ -158,8 +168,10 @@ def render_resume_docx(
                     detail = content.add_paragraph()
                     style_path = f"{collection}.{entry_index}.description" if collection else None
                     terms = (field_styles or {}).get(style_path or "", {}).get("emphasis", [])
+                    underline_terms = (field_styles or {}).get(style_path or "", {}).get("underline_terms", [])
                     import re
-                    pieces = re.split("(" + "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True)) + ")", line, flags=re.I) if terms else [line]
+                    marked = sorted(set([*terms, *underline_terms]), key=len, reverse=True)
+                    pieces = re.split("(" + "|".join(re.escape(term) for term in marked) + ")", line, flags=re.I) if marked else [line]
                     for piece in pieces:
                         if not piece:
                             continue
@@ -168,6 +180,8 @@ def render_resume_docx(
                             _style_word_run(run, field_styles, style_path)
                         if any(piece.casefold() == term.casefold() for term in terms):
                             run.bold = True
+                        if any(piece.casefold() == term.casefold() for term in underline_terms):
+                            run.underline = True
                     detail.paragraph_format.left_indent = Inches(0)
                     detail.paragraph_format.space_after = Pt(5 if not theme.compact else 2)
                     detail.paragraph_format.line_spacing = line_spacing

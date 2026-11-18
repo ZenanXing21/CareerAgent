@@ -38,5 +38,5 @@ def test_field_formatting_persists_after_reopening_session(tmp_path) -> None:
     assert reopened.json()["line_spacing"] == 2.0
     assert reopened.json()["section_spacing"] == 10
     assert reopened.json()["field_styles"]["personal_info.name"] == {
-        "size": 18.0, "bold": True, "underline": True, "emphasis": [],
+        "size": 18.0, "bold": True, "underline": True, "emphasis": [], "underline_terms": [],
     }

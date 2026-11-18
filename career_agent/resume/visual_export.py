@@ -52,7 +52,7 @@ def visual_pdf(preview_html: str, stylesheet: str) -> bytes:
               ".resume-paper .entry-primary,.resume-paper .entry-identity h3{"
               "font-family:'Noto Sans CJK SC','Microsoft YaHei',Arial,sans-serif!important;"
               "font-weight:700!important;line-height:1.5!important}"
-              ".resume-section-controls,.resume-entry-remove,.drag-hint,.section-drag-handle{display:none!important}"
+              ".resume-section-controls,.resume-entry-actions,.drag-hint,.section-drag-handle{display:none!important}"
               "[contenteditable]{outline:0!important}"
             + '</style></head><body>' + preview_html + '</body></html>'
         )

@@ -12,7 +12,8 @@ def test_word_upload_keeps_headings_bullets_and_bold_source() -> None:
     paragraph = document.add_paragraph(style="List Bullet")
     paragraph.add_run("Built ")
     paragraph.add_run("RAG").bold = True
-    paragraph.add_run(" search")
+    paragraph.add_run(" search ")
+    paragraph.add_run("API").underline = True
     output = BytesIO()
     document.save(output)
     attachment = IntakeAttachment(
@@ -23,4 +24,4 @@ def test_word_upload_keeps_headings_bullets_and_bold_source() -> None:
 
     text, image = _decode_attachment(attachment)
     assert image is None
-    assert text == "## Projects\n• Built **RAG** search"
+    assert text == "## Projects\n• Built **RAG** search __API__"

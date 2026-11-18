@@ -191,12 +191,13 @@
   toolbar.addEventListener("click", async (event) => {
     const formatAction = event.target.closest("[data-format-action]")?.dataset.formatAction;
     if (formatAction && activeField?.isConnected) {
-      if (formatAction === "bold" && selectedTerm && activeField.textContent.includes(selectedTerm)) {
+      if (["bold", "underline"].includes(formatAction) && selectedTerm && activeField.textContent.includes(selectedTerm)) {
         const path = activeField.dataset.path;
-        const terms = state.fieldStyles[path]?.emphasis || [];
+        const key = formatAction === "bold" ? "emphasis" : "underline_terms";
+        const terms = state.fieldStyles[path]?.[key] || [];
         const exists = terms.some(term => term.toLocaleLowerCase() === selectedTerm.toLocaleLowerCase());
-        updateFieldStyle(activeField, {emphasis: exists ? terms.filter(term => term.toLocaleLowerCase() !== selectedTerm.toLocaleLowerCase()) : [...terms, selectedTerm]});
-        event.target.closest('[data-format-action="bold"]').setAttribute("aria-pressed", String(!exists));
+        updateFieldStyle(activeField, {[key]: exists ? terms.filter(term => term.toLocaleLowerCase() !== selectedTerm.toLocaleLowerCase()) : [...terms, selectedTerm]});
+        event.target.closest(`[data-format-action="${formatAction}"]`).setAttribute("aria-pressed", String(!exists));
         selectedTerm = "";
         return;
       }
@@ -227,6 +228,7 @@
     toolbar.querySelectorAll("button").forEach((button) => { button.disabled = true; });
     node.classList.add("ai-optimizing");
     try {
+      commitAllResumeFields();
       await saveResume();
       const result = await api("/api/resume/optimize-field", {method: "POST", body: JSON.stringify({
         candidate_id: state.candidateId, variant, path,
@@ -238,7 +240,7 @@
         updateEditorValue(node);
       } else { toast("文字已变化，保留你的最新编辑"); return; }
       state.semanticKeywords = result.keywords || [];
-      renderResumeEditor();
+      renderResumeMobilePreview();
       $("#save-state").textContent = "AI 优化已保存";
       setStepDisabled("jobs", true);
       toast("已理解并优化这段内容，可在悬浮栏撤销");

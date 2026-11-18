@@ -421,6 +421,7 @@ $("#intake-form")?.addEventListener("submit", async (event) => {
     errorBox.classList.add("hidden");
     state.rawResume = structuredClone(result.resume);
     state.polishedResume = structuredClone(result.display_resume);
+    state.fieldStyles = result.field_styles || {};
     state.rawHometown = payload.hometown;
     state.polishedHometown = result.normalized_hometown || payload.hometown;
     state.previewVariant = "polished";
@@ -522,6 +523,7 @@ async function sendIntakeTurn({message = "", generate = false} = {}) {
     if (result.generated || result.preview_generated) {
       state.rawResume = structuredClone(result.resume);
       state.polishedResume = structuredClone(result.display_resume || result.resume);
+      state.fieldStyles = result.field_styles || {};
       state.rawHometown = result.draft?.hometown || null;
       state.polishedHometown = result.normalized_hometown || state.rawHometown;
       state.previewVariant = "polished";
@@ -830,41 +832,52 @@ const englishSectionLabels = {summary: "Professional Summary", education: "Educa
 const currentResume = () => state.previewVariant === "polished" ? state.polishedResume : state.rawResume;
 const currentHometown = () => (state.previewVariant === "polished" ? state.polishedHometown : state.rawHometown) || currentResume()?.personal_info?.hometown || null;
 
+function formatStyledText(source, style) {
+  const flags = Array.from({length: source.length}, () => ({bold: false, underline: false}));
+  for (const [key, flag] of [["emphasis", "bold"], ["underline_terms", "underline"]]) {
+    for (const term of style[key] || []) {
+      if (typeof term !== "string" || !term) continue;
+      let start = 0;
+      while (start < source.length) {
+        const index = source.toLocaleLowerCase().indexOf(term.toLocaleLowerCase(), start);
+        if (index < 0) break;
+        for (let position = index; position < index + term.length; position++) flags[position][flag] = true;
+        start = index + term.length;
+      }
+    }
+  }
+  let content = "";
+  for (let index = 0; index < source.length;) {
+    let end = index + 1;
+    while (end < source.length && flags[end].bold === flags[index].bold && flags[end].underline === flags[index].underline) end += 1;
+    const text = escapeHtml(source.slice(index, end));
+    content += flags[index].bold ? `<strong class="resume-emphasis">${flags[index].underline ? `<u>${text}</u>` : text}</strong>` : flags[index].underline ? `<u>${text}</u>` : text;
+    index = end;
+  }
+  return content;
+}
+
 function editable(value, path, className = "", placeholder = "点击编辑") {
   const style = state.fieldStyles[path] || {};
   const inlineStyle = [style.size ? `font-size:${Number(style.size)}pt` : "", style.bold ? "font-weight:700" : "", style.underline ? "text-decoration:underline" : ""].filter(Boolean).join(";");
-  const source = String(value || "");
-  const terms = (style.emphasis || []).filter(term => typeof term === "string" && term.length > 1).sort((a, b) => b.length - a.length);
-  let content = "";
-  for (let index = 0; index < source.length;) {
-    const term = terms.find(item => source.slice(index, index + item.length).toLocaleLowerCase() === item.toLocaleLowerCase());
-    if (term) { content += `<strong class="resume-emphasis">${escapeHtml(source.slice(index, index + term.length))}</strong>`; index += term.length; }
-    else { content += escapeHtml(source[index]); index += 1; }
-  }
+  const content = formatStyledText(String(value || ""), style);
   return `<span class="editable ${className}" contenteditable="true" spellcheck="false" data-path="${escapeHtml(path)}" data-placeholder="${escapeHtml(placeholder)}" style="${inlineStyle}">${content}</span>`;
 }
 
 function renderEmphasisInField(node) {
-  const source = node.textContent;
-  const terms = (state.fieldStyles[node.dataset.path]?.emphasis || []).filter(Boolean).sort((a, b) => b.length - a.length);
-  let content = "";
-  for (let index = 0; index < source.length;) {
-    const term = terms.find(item => source.slice(index, index + item.length).toLocaleLowerCase() === item.toLocaleLowerCase());
-    if (term) { content += `<strong class="resume-emphasis">${escapeHtml(source.slice(index, index + term.length))}</strong>`; index += term.length; }
-    else { content += escapeHtml(source[index]); index += 1; }
-  }
-  node.innerHTML = content;
+  node.innerHTML = formatStyledText(node.textContent, state.fieldStyles[node.dataset.path] || {});
 }
 
 function updateFieldStyle(node, change) {
   const path = node?.dataset.path;
   if (!path) return;
+  commitAllResumeFields();
   const style = {...(state.fieldStyles[path] || {}), ...change};
   state.fieldStyles[path] = style;
   node.style.fontSize = style.size ? `${Number(style.size)}pt` : "";
   node.style.fontWeight = style.bold ? "700" : "";
   node.style.textDecoration = style.underline ? "underline" : "";
-  if (Object.prototype.hasOwnProperty.call(change, "emphasis")) renderEmphasisInField(node);
+  if (Object.prototype.hasOwnProperty.call(change, "emphasis") || Object.prototype.hasOwnProperty.call(change, "underline_terms")) renderEmphasisInField(node);
   renderResumeMobilePreview();
   scheduleResumeSave();
 }
@@ -900,7 +913,7 @@ function sectionBlock(key, content, position, total, customTitle) {
 function renderEducation(resume) {
   return (resume.educations || []).map((item, index) => {
     const path = `educations.${index}`;
-    return `<article class="resume-entry"><div class="entry-heading"><div class="entry-identity"><h3>${editable(item.school, `${path}.school`, "entry-primary", "学校")}</h3><div class="entry-meta">${editable(item.major, `${path}.major`, "entry-secondary", "专业")}${editable(item.degree, `${path}.degree`, "entry-secondary", "学历")}</div></div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "课程、成绩或教育说明")}<button class="resume-entry-remove" type="button" data-delete-entry="${path}" aria-label="删除这条教育经历">删除这条经历</button></article>`;
+    return `<article class="resume-entry"><div class="entry-heading"><div class="entry-identity"><h3>${editable(item.school, `${path}.school`, "entry-primary", "学校")}</h3><div class="entry-meta">${editable(item.major, `${path}.major`, "entry-secondary", "专业")}${editable(item.degree, `${path}.degree`, "entry-secondary", "学历")}</div></div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "课程、成绩或教育说明")}<div class="resume-entry-actions"><button class="resume-entry-remove" type="button" data-add-entry="${path}" aria-label="在后面增加一条教育经历">＋ 增加</button><button class="resume-entry-remove" type="button" data-delete-entry="${path}" aria-label="删除这条教育经历">删除</button></div></article>`;
   }).join("");
 }
 
@@ -908,7 +921,7 @@ function renderExperienceEntries(items, collection, primaryField, secondaryField
   return (items || []).map((item, index) => {
     const path = `${collection}.${index}`;
     const technologies = collection === "project_experiences" && item.technologies?.length ? `<div class="entry-technologies"><b>技术：</b>${editable(item.technologies.join("、"), `${path}.technologies`, "", "相关技术")}</div>` : "";
-    return `<article class="resume-entry"><div class="entry-heading"><div class="entry-identity"><h3>${editable(item[primaryField], `${path}.${primaryField}`, "entry-primary", "经历名称")}</h3><div class="entry-meta">${editable(item[secondaryField], `${path}.${secondaryField}`, "entry-secondary", "角色")}</div></div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "点击填写经历内容")}${technologies}<button class="resume-entry-remove" type="button" data-delete-entry="${collection}.${index}" aria-label="删除这条经历">删除这条经历</button></article>`;
+    return `<article class="resume-entry"><div class="entry-heading"><div class="entry-identity"><h3>${editable(item[primaryField], `${path}.${primaryField}`, "entry-primary", "经历名称")}</h3><div class="entry-meta">${editable(item[secondaryField], `${path}.${secondaryField}`, "entry-secondary", "角色")}</div></div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "点击填写经历内容")}${technologies}<div class="resume-entry-actions"><button class="resume-entry-remove" type="button" data-add-entry="${path}" aria-label="在后面增加一条经历">＋ 增加</button><button class="resume-entry-remove" type="button" data-delete-entry="${path}" aria-label="删除这条经历">删除</button></div></article>`;
   }).join("");
 }
 
@@ -1178,6 +1191,10 @@ function bindResumeEditable(node) {
 
 function bindResumeInteractions() {
   $$("#resume-editor .editable").forEach(bindResumeEditable);
+  $$("#resume-editor [data-add-entry]").forEach((button) => button.addEventListener("click", () => {
+    const [collection, indexText] = button.dataset.addEntry.split(".");
+    addResumeEntry(collection, Number(indexText) + 1);
+  }));
   $$("#resume-editor [data-delete-entry]").forEach((button) => button.addEventListener("click", () => {
     commitAllResumeFields();
     const [collection, indexText] = button.dataset.deleteEntry.split(".");
@@ -1365,10 +1382,9 @@ $("#toggle-polish").addEventListener("click", async () => {
   toast(state.previewVariant === "polished" ? "已恢复 AI 整理版" : "已切换为与输入内容一致的原始版");
 });
 
-$("#add-resume-entry").addEventListener("click", () => {
+function addResumeEntry(collection, index = currentResume()?.[collection]?.length || 0) {
   if (!currentResume()) return;
   commitAllResumeFields();
-  const collection = $("#new-resume-entry-kind").value;
   const entry = {id: crypto.randomUUID(), source_text: "手动新增的简历条目", description: null};
   if (collection === "work_experiences" || collection === "internships") {
     entry.experience_type = collection === "internships" ? "internship" : "work";
@@ -1376,13 +1392,22 @@ $("#add-resume-entry").addEventListener("click", () => {
   } else if (collection === "educations") entry.school = "新学校";
   else if (collection === "campus_experiences") entry.organization = "新组织";
   else entry.name = "新经历";
-  currentResume()[collection].push(entry);
+  const nextStyles = {};
+  for (const [path, style] of Object.entries(state.fieldStyles)) {
+    const match = path.match(new RegExp(`^${collection}\\.(\\d+)\\.(.+)$`));
+    if (!match) { nextStyles[path] = style; continue; }
+    const oldIndex = Number(match[1]);
+    nextStyles[`${collection}.${oldIndex >= index ? oldIndex + 1 : oldIndex}.${match[2]}`] = style;
+  }
+  state.fieldStyles = nextStyles;
+  currentResume()[collection].splice(index, 0, entry);
   renderResumeEditor();
   scheduleResumeSave();
-  const index = currentResume()[collection].length - 1;
   const primary = {work_experiences: "company", internships: "company", educations: "school", campus_experiences: "organization", project_experiences: "name"}[collection];
   $("#resume-editor .editable[data-path='" + collection + "." + index + "." + primary + "']")?.focus();
-});
+}
+
+$("#add-resume-entry").addEventListener("click", () => addResumeEntry($("#new-resume-entry-kind").value));
 
 $("#confirm-resume").addEventListener("click", async () => {
   try {
