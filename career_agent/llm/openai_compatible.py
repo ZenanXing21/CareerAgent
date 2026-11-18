@@ -267,7 +267,9 @@ class OpenAICompatibleProvider:
             operation="parse_resume",
             system=(
                 "Extract only facts explicitly present in the resume. Preserve exact source_text "
-                "snippets. Never infer missing dates, proficiency, employers, education, "
+                "snippets and preserve existing heading, bullet, line-break and **bold** structure "
+                "inside descriptions when the source is already well organized. "
+                "Never infer missing dates, proficiency, employers, education, "
                 "or metrics."
             ),
             user=f"resume_id={resume_id}\nversion={version}\nRESUME:\n{raw_text}",
@@ -314,6 +316,10 @@ class OpenAICompatibleProvider:
                 "written date ranges when possible; otherwise preserve their meaning. "
                 "Polish descriptions for resume readability but never add employers, duties, "
                 "technologies, achievements, metrics, or numbers not present in the source. "
+                "If the candidate's source is already organized with headings, short bullets, "
+                "numbered points, line breaks, or **bold** emphasis, preserve that hierarchy "
+                "and order where possible. Refine wording within the existing structure "
+                "instead of flattening it into paragraphs. "
                 "Use semantic keywords and factual actions to compose new professional sentences; "
                 "do not merely copy the user's wording or prepend '参与' to every sentence. "
                 "For work/internship, title is the employer and role is the actual job title; "
@@ -536,7 +542,9 @@ class OpenAICompatibleProvider:
                 "then condense repeated ideas. Separate a short overview from distinct points "
                 "using newline characters inside description; never merge all points into one paragraph. "
                 "Follow the user's requested format exactly: numbered 1. 2. 3., bullets, headings, "
-                "or another structure. If no format is specified, use a short overview followed "
+                "or another structure. If no new format is specified and the existing content "
+                "already has clear headings, bullets, line breaks or emphasis, keep that structure. "
+                "For unstructured content, use a short overview followed "
                 "by bullet points with parallel phrasing. Prefer short sentences and one concrete "
                 "action or result per bullet. Break long paragraphs into separate bullets; use "
                 "the literal bullet character • followed by a space and a newline between bullets. "

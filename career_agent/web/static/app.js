@@ -844,6 +844,18 @@ function editable(value, path, className = "", placeholder = "点击编辑") {
   return `<span class="editable ${className}" contenteditable="true" spellcheck="false" data-path="${escapeHtml(path)}" data-placeholder="${escapeHtml(placeholder)}" style="${inlineStyle}">${content}</span>`;
 }
 
+function renderEmphasisInField(node) {
+  const source = node.textContent;
+  const terms = (state.fieldStyles[node.dataset.path]?.emphasis || []).filter(Boolean).sort((a, b) => b.length - a.length);
+  let content = "";
+  for (let index = 0; index < source.length;) {
+    const term = terms.find(item => source.slice(index, index + item.length).toLocaleLowerCase() === item.toLocaleLowerCase());
+    if (term) { content += `<strong class="resume-emphasis">${escapeHtml(source.slice(index, index + term.length))}</strong>`; index += term.length; }
+    else { content += escapeHtml(source[index]); index += 1; }
+  }
+  node.innerHTML = content;
+}
+
 function updateFieldStyle(node, change) {
   const path = node?.dataset.path;
   if (!path) return;
@@ -852,6 +864,7 @@ function updateFieldStyle(node, change) {
   node.style.fontSize = style.size ? `${Number(style.size)}pt` : "";
   node.style.fontWeight = style.bold ? "700" : "";
   node.style.textDecoration = style.underline ? "underline" : "";
+  if (Object.prototype.hasOwnProperty.call(change, "emphasis")) renderEmphasisInField(node);
   renderResumeMobilePreview();
   scheduleResumeSave();
 }
@@ -887,7 +900,7 @@ function sectionBlock(key, content, position, total, customTitle) {
 function renderEducation(resume) {
   return (resume.educations || []).map((item, index) => {
     const path = `educations.${index}`;
-    return `<article class="resume-entry"><div class="entry-heading"><div class="entry-identity"><h3>${editable(item.school, `${path}.school`, "entry-primary", "学校")}</h3><div class="entry-meta">${editable(item.major, `${path}.major`, "entry-secondary", "专业")}${editable(item.degree, `${path}.degree`, "entry-secondary", "学历")}</div></div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "课程、成绩或教育说明")}</article>`;
+    return `<article class="resume-entry"><div class="entry-heading"><div class="entry-identity"><h3>${editable(item.school, `${path}.school`, "entry-primary", "学校")}</h3><div class="entry-meta">${editable(item.major, `${path}.major`, "entry-secondary", "专业")}${editable(item.degree, `${path}.degree`, "entry-secondary", "学历")}</div></div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "课程、成绩或教育说明")}<button class="resume-entry-remove" type="button" data-delete-entry="${path}" aria-label="删除这条教育经历">删除这条经历</button></article>`;
   }).join("");
 }
 
@@ -895,7 +908,7 @@ function renderExperienceEntries(items, collection, primaryField, secondaryField
   return (items || []).map((item, index) => {
     const path = `${collection}.${index}`;
     const technologies = collection === "project_experiences" && item.technologies?.length ? `<div class="entry-technologies"><b>技术：</b>${editable(item.technologies.join("、"), `${path}.technologies`, "", "相关技术")}</div>` : "";
-    return `<article class="resume-entry"><div class="entry-heading"><div class="entry-identity"><h3>${editable(item[primaryField], `${path}.${primaryField}`, "entry-primary", "经历名称")}</h3><div class="entry-meta">${editable(item[secondaryField], `${path}.${secondaryField}`, "entry-secondary", "角色")}</div></div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "点击填写经历内容")}${technologies}</article>`;
+    return `<article class="resume-entry"><div class="entry-heading"><div class="entry-identity"><h3>${editable(item[primaryField], `${path}.${primaryField}`, "entry-primary", "经历名称")}</h3><div class="entry-meta">${editable(item[secondaryField], `${path}.${secondaryField}`, "entry-secondary", "角色")}</div></div>${dateRange(item, path)}</div>${editable(item.description, `${path}.description`, "entry-description block-editable", "点击填写经历内容")}${technologies}<button class="resume-entry-remove" type="button" data-delete-entry="${collection}.${index}" aria-label="删除这条经历">删除这条经历</button></article>`;
   }).join("");
 }
 
@@ -927,8 +940,7 @@ function updateResumeEditorText(before, after) {
   if (Boolean(before.summary) !== Boolean(after.summary) ||
       Boolean(before.skills?.length) !== Boolean(after.skills?.length) ||
       Boolean(before.personal_info?.location) !== Boolean(after.personal_info?.location) ||
-      Boolean(before.personal_info?.hometown) !== Boolean(after.personal_info?.hometown) ||
-      (before.personal_info?.links || []).length !== (after.personal_info?.links || []).length) return false;
+      Boolean(before.personal_info?.hometown) !== Boolean(after.personal_info?.hometown)) return false;
   if (collections.some(key => (before[key] || []).length !== (after[key] || []).length ||
       (before[key] || []).some((item, index) => item.id !== after[key][index]?.id))) return false;
   const valueAt = (resume, path) => {
@@ -937,6 +949,15 @@ function updateResumeEditorText(before, after) {
     return path.split(".").reduce((value, part) => value?.[part], resume) ?? "";
   };
   const updates = [];
+  if (JSON.stringify(before.personal_info?.links || []) !== JSON.stringify(after.personal_info?.links || [])) {
+    const identity = $("#resume-editor .identity-block");
+    identity.querySelector(".portfolio-links")?.remove();
+    const markup = renderProfileLinks(after.personal_info?.links || []);
+    if (markup) {
+      identity.querySelector(".contact-line").insertAdjacentHTML("afterend", markup);
+      identity.querySelectorAll(".portfolio-links .editable").forEach(bindResumeEditable);
+    }
+  }
   for (const node of $$("#resume-editor .editable")) {
     const previous = valueAt(before, node.dataset.path);
     const next = valueAt(after, node.dataset.path);
@@ -1141,8 +1162,7 @@ function moveResumeSection(sectionKey, direction) {
   scheduleResumeSave();
 }
 
-function bindResumeInteractions() {
-  $$("#resume-editor .editable").forEach((node) => {
+function bindResumeEditable(node) {
     node.addEventListener("input", () => updateEditorValue(node));
     node.addEventListener("compositionend", () => updateEditorValue(node));
     node.addEventListener("blur", () => {
@@ -1154,7 +1174,26 @@ function bindResumeInteractions() {
     if (node.classList.contains("section-title-editable")) node.addEventListener("blur", () => {
       if (!node.textContent.trim()) renderResumeEditor();
     });
-  });
+}
+
+function bindResumeInteractions() {
+  $$("#resume-editor .editable").forEach(bindResumeEditable);
+  $$("#resume-editor [data-delete-entry]").forEach((button) => button.addEventListener("click", () => {
+    commitAllResumeFields();
+    const [collection, indexText] = button.dataset.deleteEntry.split(".");
+    const index = Number(indexText);
+    currentResume()[collection].splice(index, 1);
+    const nextStyles = {};
+    for (const [path, style] of Object.entries(state.fieldStyles)) {
+      const match = path.match(new RegExp(`^${collection}\\.(\\d+)\\.(.+)$`));
+      if (!match) { nextStyles[path] = style; continue; }
+      const oldIndex = Number(match[1]);
+      if (oldIndex !== index) nextStyles[`${collection}.${oldIndex > index ? oldIndex - 1 : oldIndex}.${match[2]}`] = style;
+    }
+    state.fieldStyles = nextStyles;
+    renderResumeEditor();
+    scheduleResumeSave();
+  }));
   $$('[data-move-section]').forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     moveResumeSection(button.dataset.moveSection, Number(button.dataset.direction));
@@ -1324,6 +1363,25 @@ $("#toggle-polish").addEventListener("click", async () => {
   renderResumeEditor();
   $("#toggle-polish").textContent = state.previewVariant === "polished" ? "查看原始输入版" : "返回 AI 整理版";
   toast(state.previewVariant === "polished" ? "已恢复 AI 整理版" : "已切换为与输入内容一致的原始版");
+});
+
+$("#add-resume-entry").addEventListener("click", () => {
+  if (!currentResume()) return;
+  commitAllResumeFields();
+  const collection = $("#new-resume-entry-kind").value;
+  const entry = {id: crypto.randomUUID(), source_text: "手动新增的简历条目", description: null};
+  if (collection === "work_experiences" || collection === "internships") {
+    entry.experience_type = collection === "internships" ? "internship" : "work";
+    entry.company = "新公司";
+  } else if (collection === "educations") entry.school = "新学校";
+  else if (collection === "campus_experiences") entry.organization = "新组织";
+  else entry.name = "新经历";
+  currentResume()[collection].push(entry);
+  renderResumeEditor();
+  scheduleResumeSave();
+  const index = currentResume()[collection].length - 1;
+  const primary = {work_experiences: "company", internships: "company", educations: "school", campus_experiences: "organization", project_experiences: "name"}[collection];
+  $("#resume-editor .editable[data-path='" + collection + "." + index + "." + primary + "']")?.focus();
 });
 
 $("#confirm-resume").addEventListener("click", async () => {

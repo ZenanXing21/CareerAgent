@@ -287,11 +287,34 @@ def _decode_attachment(attachment: IntakeAttachment) -> tuple[str | None, str | 
     suffix = Path(attachment.filename).suffix.casefold()
     try:
         if suffix == ".docx":
-            text = "\n".join(
-                paragraph.text.strip()
-                for paragraph in Document(BytesIO(content)).paragraphs
-                if paragraph.text.strip()
-            )
+            document = Document(BytesIO(content))
+            def formatted_paragraph(paragraph: Any) -> str:
+                parts = []
+                for segment in paragraph.iter_inner_content():
+                    value = segment.text
+                    if value:
+                        parts.append(f"**{value}**" if getattr(segment, "bold", False) and value.strip() else value)
+                text = "".join(parts).strip()
+                if not text:
+                    return ""
+                style = paragraph.style.name.casefold() if paragraph.style else ""
+                if style.startswith("heading") or style.startswith("标题"):
+                    return "## " + text
+                if "list bullet" in style or "项目符号" in style:
+                    return "• " + text
+                if "list number" in style or "编号" in style:
+                    return "1. " + text
+                return text
+            lines = []
+            for block in document.iter_inner_content():
+                if hasattr(block, "rows"):
+                    for row in block.rows:
+                        cells = [" ".join(filter(None, (formatted_paragraph(p) for p in cell.paragraphs))) for cell in row.cells]
+                        if any(cells): lines.append(" | ".join(cells))
+                else:
+                    line = formatted_paragraph(block)
+                    if line: lines.append(line)
+            text = "\n".join(lines)
             return text[:60000], None
         if suffix == ".pdf":
             text = "\n".join(
@@ -1151,6 +1174,27 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             candidate.resume_chat.extend(({"role": "user", "content": request.message}, {"role": "assistant", "content": reply}))
             return {"assistant_message": reply, "resume": resume.model_dump(mode="json"), "field_styles": candidate.field_styles, "changed_sections": ["术语加粗"] if terms else []}
         removal = requested_section_removal(request.message)
+        if re.search(r"(?:删除|删掉|移除|去掉).{0,16}(?:空白|空的|没有内容).{0,12}经历|(?:空白|空的|没有内容).{0,12}经历.{0,12}(?:删除|删掉|移除|去掉)", request.message):
+            resume = candidate.raw_resume if request.variant == "raw" else candidate.display_resume
+            entries = list(resume.project_experiences)
+            blank_index = next((index for index, item in enumerate(entries)
+                                if not (item.description or "").strip() and not (item.role or "").strip()), None)
+            if blank_index is None:
+                reply = "没有找到空白的经历条目。请指出要删除的经历名称，或在精修编辑中点击该条的删除按钮。"
+                edited = resume
+                changed = []
+            else:
+                entries.pop(blank_index)
+                edited = resume.model_copy(update={"project_experiences": entries})
+                candidate.resume_revisions.append({"variant": request.variant, "resume": resume.model_dump(mode="json")})
+                if request.variant == "raw": candidate.raw_resume = edited
+                else: candidate.display_resume = edited
+                candidate.confirmed = False
+                candidate.confirmed_resume = None
+                reply = "已删除一条空白的经历，其他内容保持不变。"
+                changed = ["经历"]
+            candidate.resume_chat.extend(({"role": "user", "content": request.message}, {"role": "assistant", "content": reply}))
+            return {"assistant_message": reply, "resume": edited.model_dump(mode="json"), "changed_sections": changed}
         if removal == "experience":
             resume = candidate.raw_resume if request.variant == "raw" else candidate.display_resume
             edited = resume.model_copy(update={

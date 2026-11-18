@@ -6,6 +6,7 @@
   const selectedSkills = new Set();
   const undo = new Map();
   let activeField = null;
+  let selectedTerm = "";
   let toolbarAnchor = null;
   let hideTimer;
   let designing = false;
@@ -90,11 +91,15 @@
     if (optimizing || !node?.isConnected) return;
     cancelToolbarHide();
     const rect = node.getBoundingClientRect();
-    if (activeField !== node) toolbarAnchor = null;
+    if (activeField !== node) { toolbarAnchor = null; selectedTerm = ""; }
     if (event?.type === "pointerover" || (event?.type === "click" && event.detail > 0)) {
       toolbarAnchor = {x: event.clientX - rect.left, y: event.clientY - rect.top};
     }
     activeField = node;
+    const selection = window.getSelection();
+    if (selection?.rangeCount && node.contains(selection.anchorNode) && node.contains(selection.focusNode)) {
+      selectedTerm = selection.toString().trim();
+    } else if (event?.type === "pointerover") selectedTerm = "";
     toolbar.classList.remove("hidden");
     toolbar.querySelector('[data-text-action="optimize"]').disabled = !isContent;
     toolbar.querySelector('[data-text-action="shorten"]').disabled = !isContent;
@@ -127,6 +132,13 @@
   });
   document.addEventListener("focusin", (event) => {
     if (event.target.matches("#resume-editor .editable")) showToolbar(event.target, event);
+  });
+  document.addEventListener("selectionchange", () => {
+    if (!activeField?.isConnected) return;
+    const selection = window.getSelection();
+    if (selection?.rangeCount && activeField.contains(selection.anchorNode) && activeField.contains(selection.focusNode)) {
+      selectedTerm = selection.toString().trim();
+    }
   });
   document.addEventListener("click", (event) => {
     const node = event.target.closest("#resume-editor .editable");
@@ -179,6 +191,15 @@
   toolbar.addEventListener("click", async (event) => {
     const formatAction = event.target.closest("[data-format-action]")?.dataset.formatAction;
     if (formatAction && activeField?.isConnected) {
+      if (formatAction === "bold" && selectedTerm && activeField.textContent.includes(selectedTerm)) {
+        const path = activeField.dataset.path;
+        const terms = state.fieldStyles[path]?.emphasis || [];
+        const exists = terms.some(term => term.toLocaleLowerCase() === selectedTerm.toLocaleLowerCase());
+        updateFieldStyle(activeField, {emphasis: exists ? terms.filter(term => term.toLocaleLowerCase() !== selectedTerm.toLocaleLowerCase()) : [...terms, selectedTerm]});
+        event.target.closest('[data-format-action="bold"]').setAttribute("aria-pressed", String(!exists));
+        selectedTerm = "";
+        return;
+      }
       const next = !Boolean((state.fieldStyles[activeField.dataset.path] || {})[formatAction]);
       updateFieldStyle(activeField, {[formatAction]: next});
       event.target.closest("[data-format-action]").setAttribute("aria-pressed", String(next));

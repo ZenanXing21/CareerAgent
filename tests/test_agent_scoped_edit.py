@@ -72,3 +72,20 @@ def test_adding_experience_does_not_rewrite_existing_entries() -> None:
     result = preserve_unrequested_resume_facts(current, proposed, "增加一段新的工作经历：New Co")
     assert result.work_experiences[0].description == "Manually corrected text."
     assert result.work_experiences[1].description == "Added experience."
+
+
+def test_chat_deletes_only_one_blank_experience(tmp_path) -> None:
+    headers = {"X-Workspace-Key": "blank-entry-test-workspace-key-123456"}
+    with TestClient(create_app(state_file=tmp_path / "workspace.json")) as client:
+        session_id = client.post("/api/sessions", headers=headers).json()["id"]
+        resume = {"resume_id": session_id, "version": "v1", "raw_text": "Original resume",
+            "project_experiences": [
+                {"id": "kept", "source_text": "source", "name": "Real Project", "description": "Important work."},
+                {"id": "blank", "source_text": "source", "name": "New Experience"},
+            ]}
+        assert client.post("/api/workspace/restore", headers=headers,
+            json={"candidates": {session_id: {"raw_resume": resume, "display_resume": resume}}}).status_code == 200
+        response = client.post("/api/resume/agent", headers=headers,
+            json={"candidate_id": session_id, "message": "你把一段空白的经历给删掉"})
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()["resume"]["project_experiences"]] == ["kept"]

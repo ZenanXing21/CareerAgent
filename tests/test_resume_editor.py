@@ -8,6 +8,8 @@ def test_remove_named_experience_section_without_matching_education_or_work() ->
     assert requested_section_removal("删除项目经历整个模块") == "experience"
     assert requested_section_removal("删除教育经历") is None
     assert requested_section_removal("工作经历不要删") is None
+    assert requested_section_removal("你把一段空白的经历给删掉") is None
+    assert requested_section_removal("删除其中一条项目经历") is None
 
 
 def test_user_edits_become_source_preserving_confirmed_facts() -> None:

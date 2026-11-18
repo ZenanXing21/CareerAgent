@@ -117,7 +117,7 @@ def preserve_unrequested_resume_facts(
                 proposed_item = proposed_by_id.get(item.id)
                 targeted = (not named_ids or item.id in named_ids) and not adding_new_entry
                 if proposed_item is None:
-                    if targeted and targeted_removal:
+                    if targeted and targeted_removal and named_ids:
                         continue
                     merged.append(item)
                     continue

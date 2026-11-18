@@ -138,8 +138,14 @@
               <input id="resume-section-spacing" type="range" min="6" max="48" step="2" value="18" aria-label="简历模块间距">
             </div>
             <div class="editor-group">
+              <p class="section-kicker">增删经历</p>
+              <label for="new-resume-entry-kind">新增条目</label>
+              <select id="new-resume-entry-kind" aria-label="新增经历类型"><option value="project_experiences">经历</option><option value="work_experiences">工作经历</option><option value="internships">实习经历</option><option value="campus_experiences">校园经历</option><option value="educations">教育经历</option></select>
+              <button class="secondary-button full-width" id="add-resume-entry" type="button">＋ 添加条目</button>
+            </div>
+            <div class="editor-group">
               <p class="section-kicker">编辑提示</p>
-              <p class="editor-help">点击简历文字即可修改；文字旁的工具条可调整当前字段字号、加粗和下划线。左侧可调整正文行距。按住模块标题可拖动排序。</p>
+              <p class="editor-help">点击文字修改；选中一个词后点 B 可只加粗该词。每条经历旁可单独删除。按住模块标题可拖动排序。</p>
               <button class="secondary-button full-width" id="toggle-polish" type="button">查看原始输入版</button>
             </div>
           </aside>

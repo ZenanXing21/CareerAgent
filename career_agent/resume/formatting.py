@@ -20,7 +20,8 @@ def requested_section_removal(message: str) -> str | None:
     target = r"(?<!教育)(?<!工作)(?<!实习)(?<!校园)(?<!项目)经历(?:这个|那一块|这一块|模块|栏目|部分)?|项目经历|项目经验"
     action = r"删掉|删除|全删|整个删|去掉|移除|不要|不保留"
     whole = rf"(?:{action}).{{0,14}}(?:{target})|(?:{target}).{{0,14}}(?:{action})"
-    return "experience" if re.search(whole, message) else None
+    scope = r"整个|整块|全部|所有|全删|那一块|这一块|这个模块|模块|栏目|板块|整栏"
+    return "experience" if re.search(whole, message) and re.search(scope, message) else None
 
 
 def requested_format(message: str, current_order: list[str], current_template: str) -> tuple[list[str], str] | None:
