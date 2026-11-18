@@ -239,11 +239,14 @@ textarea { resize: vertical; line-height: 1.55; }.full-field { margin: 16px 0; }
 #chat-editor-host .resume-paper { width: min(100%, 794px); margin: 0 auto; min-height: 800px; }
 .semantic-keywords { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .semantic-keywords span { font-size: 12px; color: #41666c; background: #e7f1f0; padding: 4px 8px; border-radius: 6px; }
-.resume-text-toolbar { position: fixed; z-index: 90; display: flex; align-items: center; padding: 4px; gap: 2px; border-radius: 11px; background: #272b30; box-shadow: 0 6px 22px #14202b26; }
+.resume-text-toolbar { position: fixed; z-index: 90; display: flex; flex-wrap: wrap; max-width: calc(100vw - 16px); align-items: center; padding: 4px; gap: 2px; border-radius: 11px; background: #272b30; box-shadow: 0 6px 22px #14202b26; }
 .resume-text-toolbar::before { content: ""; position: absolute; inset: -8px -10px; border-radius: 14px; z-index: -1; }
 .resume-text-toolbar button { min-height: 38px; border: 0; border-radius: 7px; padding: 0 10px; font-size: 13px; color: #fff; background: transparent; white-space: nowrap; }
 .resume-text-toolbar button:hover, .resume-text-toolbar button:focus-visible { background: #454c54; }
 .resume-text-toolbar button:disabled { opacity: .4; }
+.resume-text-toolbar button[aria-pressed="true"] { background: #54756e; }
+.toolbar-font-size { display: flex; align-items: center; gap: 4px; padding: 0 6px; color: white; font-size: 12px; white-space: nowrap; }
+.toolbar-font-size select { width: 72px; padding: 4px; border-radius: 5px; color: #1e3036; background: white; }
 .ai-optimizing { background: #eaf6f1; animation: studio-pulse 1.2s ease-in-out infinite alternate; }
 @keyframes studio-pulse { to { opacity: .5; } }
 .designed-template-slot { position: relative; min-width: 0; }
@@ -286,6 +289,20 @@ textarea { resize: vertical; line-height: 1.55; }.full-field { margin: 16px 0; }
 .template-skill-picker small { flex-basis: 100%; font-size: 11px; color: #7b8b93; }
 .template-skill-picker button { padding: 5px 9px; font-size: 12px; border-radius: 8px; border: 1px solid #dce5e4; background: #fff; color: #536b73; }
 .template-skill-picker button[aria-pressed="true"] { border-color: #238a80; background: #e9f6f2; color: #147365; }
+.skill-install-controls { padding: 0 14px 12px; display: grid; gap: 7px; }
+.skill-file-button { display: inline-block; width: fit-content; padding: 6px 10px; border: 1px solid #cddfdd; border-radius: 8px; color: #176b72; font-size: 12px; cursor: pointer; }
+.skill-file-button input { display: none; }
+#style-skill-url-form { display: flex; gap: 6px; }
+#style-skill-url { flex: 1; min-width: 0; padding: 6px 8px; font-size: 12px; }
+#style-skill-url-form button { padding: 6px 10px; border: 1px solid #cddfdd; border-radius: 8px; background: white; color: #176b72; }
+.skill-remove { margin-left: 5px; color: #a53845; font-weight: 700; }
+.mcp-style-connector { font-size: 12px; color: #355b63; }
+.mcp-style-connector summary { cursor: pointer; padding: 5px 0; font-weight: 700; }
+#mcp-style-connect-form, #mcp-style-import-form { display: grid; gap: 6px; margin-top: 8px; }
+#mcp-style-connect-form input, #mcp-style-import-form select, #mcp-style-import-form textarea { width: 100%; min-width: 0; padding: 7px 8px; font-size: 12px; }
+#mcp-style-connect-form button, #mcp-style-import-form button { width: fit-content; border: 1px solid #cddfdd; border-radius: 8px; background: white; color: #176b72; padding: 7px 10px; }
+#mcp-style-import-form.hidden { display: none; }
+#mcp-style-schema { display: block; max-height: 90px; overflow: auto; white-space: pre-wrap; color: #657c82; }
 .template-proposal-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid #edf1f0; background: #f7fbf9; }
 .template-proposal-actions > span { color: #62817d; font-size: 11px; }
 .template-proposal-actions button { min-height: 38px; font-size: 12px; padding: 8px 12px; }
@@ -829,14 +846,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .task-session-row .task-session-action.danger:hover { color: #b32635; background: #fff0f1; }
 
 /* Resume type scale: identity > section > entry > metadata > body. */
-.resume-paper { --resume-entry-size: 15px; --resume-meta-size: 12.5px; --resume-body-size: 13.5px; line-height: 1.55; }
+.resume-paper { --resume-entry-size: 15px; --resume-meta-size: 12.5px; --resume-body-size: 13.5px; --resume-line-spacing: 1.85; --resume-section-spacing: 18px; line-height: 1.55; }
 .resume-paper h1 { font-weight: 800; letter-spacing: -.025em; }
 .resume-paper .contact-line { font-size: 12px; line-height: 1.45; }
-.resume-paper .resume-sections { display: grid; gap: 22px; }
+.resume-paper .resume-sections { display: grid; gap: var(--resume-section-spacing); }
 .resume-paper .editable-section { margin-block: 0; }
 .resume-paper .resume-section-title { margin-bottom: 12px; }
 .resume-paper .resume-section-title h2 { font-weight: 750; line-height: 1.25; }
-.resume-paper .resume-entry { margin-bottom: 17px; break-inside: avoid; }
+.resume-paper .resume-entry { margin-bottom: 23px; break-inside: avoid; }
 .resume-paper .resume-entry:last-child { margin-bottom: 0; }
 .resume-paper .entry-heading { align-items: flex-start; gap: 16px; }
 .resume-paper .entry-heading > .entry-identity { display: block; min-width: 0; flex: 1; }
@@ -846,6 +863,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .resume-paper .entry-meta .entry-secondary { color: inherit; font-size: inherit; font-weight: 500; }
 .resume-paper .entry-meta .entry-secondary + .entry-secondary:not(:empty)::before { content: " · "; color: #8a959d; white-space: pre; }
 .resume-paper .resume-dates { padding-top: 2px; font-size: 11.5px; line-height: 1.4; }
-.resume-paper .entry-description { margin-top: 9px; color: #34414a; font-size: var(--resume-body-size); font-weight: 400; line-height: 1.65; }
-.resume-paper .summary-line, .resume-paper .skills-line { font-size: var(--resume-body-size); font-weight: 400; line-height: 1.65; }
+.resume-paper .entry-description { margin-top: 11px; color: #34414a; font-size: var(--resume-body-size); font-weight: 400; line-height: var(--resume-line-spacing); }
+.resume-paper .summary-line, .resume-paper .skills-line { font-size: var(--resume-body-size); font-weight: 400; line-height: var(--resume-line-spacing); }
+.spacing-control { display: flex; justify-content: space-between; gap: 10px; color: #34414a; font-size: 13px; font-weight: 650; margin-bottom: 10px; }
+.spacing-control output { color: #176b72; }
+#resume-line-spacing, #resume-section-spacing { width: 100%; accent-color: #176b72; }
 .resume-paper .entry-technologies { margin-top: 7px; font-size: var(--resume-meta-size); line-height: 1.5; }

@@ -18,8 +18,7 @@ import paramiko
 ROOT = Path(__file__).resolve().parents[1]
 HOST = "47.83.139.234"
 DOMAIN = "www.zenanxing.cloud"
-OLD_UPSTREAM = "127.0.0.1:8002"
-NEW_UPSTREAM = "127.0.0.1:18002"
+UPSTREAMS = ("127.0.0.1:8002", "127.0.0.1:18002")
 RELEASE = time.strftime("%Y%m%d%H%M%S")
 REMOTE = f"/opt/career-agent/releases/{RELEASE}"
 IMAGE = f"career-agent:{RELEASE}"
@@ -48,8 +47,11 @@ def main() -> None:
     client.connect(HOST, username="root", password=getpass.getpass("Server password: "), timeout=20)
     try:
         config = run(client, "cat /etc/caddy/Caddyfile")
-        if "handle_path /CareerAgent/*" not in config or config.count(OLD_UPSTREAM) != 2:
+        old_upstream = next((item for item in UPSTREAMS if config.count(item) == 2), None)
+        if "handle_path /CareerAgent/*" not in config or old_upstream is None:
             raise RuntimeError("The live Caddy route differs from the expected version; no switch was made")
+        new_upstream = next(item for item in UPSTREAMS if item != old_upstream)
+        run(client, f"docker ps -q --filter publish={new_upstream.rsplit(':', 1)[1]} | xargs -r docker stop")
         run(client, f"install -d -m 700 {shlex.quote(REMOTE)}")
         with client.open_sftp() as sftp:
             sftp.put(str(bundle), f"{REMOTE}/bundle.tar.gz")
@@ -60,10 +62,10 @@ def main() -> None:
         run(client, f"docker run -d --name {CONTAINER} --restart unless-stopped "
             "--env-file /opt/career-agent/shared/.env "
             "-v /opt/career-agent/shared/data:/app/tmp "
-            f"-p {NEW_UPSTREAM}:8000 {IMAGE}")
+            f"-p {new_upstream}:8000 {IMAGE}")
         for _ in range(30):
             try:
-                status = json.loads(run(client, f"curl -fsS --max-time 5 http://{NEW_UPSTREAM}/api/status"))
+                status = json.loads(run(client, f"curl -fsS --max-time 5 http://{new_upstream}/api/status"))
                 if status.get("ready"):
                     break
             except (RuntimeError, ValueError):
@@ -73,7 +75,7 @@ def main() -> None:
             raise RuntimeError("New container failed health check; current site was not changed")
         backup = f"/etc/caddy/Caddyfile.before-career-agent-{RELEASE}"
         run(client, f"cp /etc/caddy/Caddyfile {backup}")
-        updated = config.replace(OLD_UPSTREAM, NEW_UPSTREAM)
+        updated = config.replace(old_upstream, new_upstream)
         encoded = base64.b64encode(updated.encode()).decode()
         command = "import base64,pathlib; pathlib.Path('/etc/caddy/Caddyfile.pending').write_bytes(base64.b64decode('" + encoded + "'))"
         run(client, "python3 -c " + shlex.quote(command))

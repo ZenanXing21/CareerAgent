@@ -16,6 +16,9 @@ const state = {
   templateId: "modern",
   sectionOrder: ["summary", "education", "work", "internship", "experience", "campus", "skills"],
   customTheme: null,
+  lineSpacing: 1.85,
+  sectionSpacing: 18,
+  fieldStyles: {},
   resumeMobileMode: "edit",
   jobs: [],
   selectedJobIds: new Set(),
@@ -35,6 +38,9 @@ const state = {
   templateChat: [],
 };
 localStorage.setItem("careerCandidateId", state.candidateId);
+const resumeDraftKey = () => `careerResumePending:${state.candidateId}`;
+const resumeVariantKey = () => `careerResumeVariant:${state.candidateId}`;
+state.previewVariant = localStorage.getItem(resumeVariantKey()) === "raw" ? "raw" : "polished";
 
 async function renderTaskSessions() {
   const panel = document.querySelector("#task-session-list");
@@ -222,7 +228,10 @@ async function restoreResumeSession() {
     state.polishedResume = result.display_resume;
     state.rawHometown = result.raw_hometown;
     state.polishedHometown = result.polished_hometown;
-    state.sectionOrder = result.section_order;
+    state.sectionOrder = result.section_order?.length ? result.section_order : ["summary", "education", "work", "internship", "experience", "campus", "skills"];
+    state.lineSpacing = result.line_spacing || 1.85;
+    state.sectionSpacing = result.section_spacing ?? 18;
+    state.fieldStyles = result.field_styles || {};
     state.templateId = result.template_id;
     state.customTheme = result.custom_theme;
     state.uploadedTheme = result.custom_theme;
@@ -233,6 +242,21 @@ async function restoreResumeSession() {
     state.templateChat = result.template_chat || [];
     state.semanticKeywords = result.semantic_keywords || [];
     state.photoAsset = result.photo_asset || state.photoAsset;
+    let pendingResume = null;
+    try { pendingResume = JSON.parse(localStorage.getItem(resumeDraftKey()) || "null"); } catch { localStorage.removeItem(resumeDraftKey()); }
+    if (pendingResume?.candidate_id === state.candidateId && pendingResume.resume && ["raw", "polished"].includes(pendingResume.variant)) {
+      state.previewVariant = pendingResume.variant;
+      if (pendingResume.variant === "raw") state.rawResume = pendingResume.resume;
+      else state.polishedResume = pendingResume.resume;
+      state.sectionOrder = pendingResume.section_order || state.sectionOrder;
+      state.templateId = pendingResume.template_id || state.templateId;
+      state.activeDesignId = pendingResume.design_id || state.activeDesignId;
+      state.lineSpacing = pendingResume.line_spacing || state.lineSpacing;
+      state.sectionSpacing = pendingResume.section_spacing ?? state.sectionSpacing;
+      state.fieldStyles = pendingResume.field_styles || state.fieldStyles;
+      if (pendingResume.variant === "raw") state.rawHometown = pendingResume.hometown;
+      else state.polishedHometown = pendingResume.hometown;
+    }
     if (state.templateId === "designed") state.customTheme = state.designedTemplate?.theme;
     if (result.intake_draft) renderIntakeSummary(result.intake_draft, Boolean(state.photoAsset));
     (result.intake_chat || []).forEach((message) => renderIntakeMessage(message.role, message.content));
@@ -240,6 +264,8 @@ async function restoreResumeSession() {
     setStepDisabled("resume", false);
     setStepDisabled("jobs", !result.confirmed);
     renderResumeEditor();
+    $("#toggle-polish").textContent = state.previewVariant === "polished" ? "查看原始输入版" : "返回 AI 整理版";
+    if (pendingResume) saveResume().catch(() => {});
     $("#chat-resume-preview").classList.remove("hidden");
     $("#generate-from-chat").dataset.action = "confirm-resume";
     $("#generate-from-chat").textContent = "确认简历并发现岗位 →";
@@ -466,27 +492,8 @@ async function sendIntakeTurn({message = "", generate = false} = {}) {
   setLoading(true, generate ? "正在生成初版简历" : "正在理解并整理资料", generate ? "AI 正在分类经历、统一日期与技能表达。" : "Agent 正在提取你刚刚提供的事实并判断还缺什么。");
   try {
     if (currentResume() && message.trim() && !attachments.length && !generate) {
-      if (/(不要|别|不放|不加|去掉|删除|移除|删掉|隐藏).{0,12}(照片|头像)|(照片|头像).{0,12}(不要|别放|去掉|删除|移除|删掉|隐藏)/.test(message)) {
-        const result = await api("/api/resume/remove-photo", {method: "POST", body: JSON.stringify({candidate_id: state.candidateId})});
-        state.photoAsset = null;
-        renderIntakeMessage("assistant", result.assistant_message);
-        renderResumeEditor();
-        return;
-      }
-      await saveResume();
-      const edited = await api("/api/resume/agent", {method: "POST", body: JSON.stringify({
-        candidate_id: state.candidateId, variant: state.previewVariant, message,
-      })});
-      if (state.previewVariant === "polished") state.polishedResume = edited.resume;
-      else state.rawResume = edited.resume;
-      if (edited.section_order) state.sectionOrder = edited.section_order;
-      if (edited.template_id) state.templateId = edited.template_id;
-      if (Object.prototype.hasOwnProperty.call(edited, "photo_asset")) state.photoAsset = edited.photo_asset;
+      const edited = await runResumeAgentEdit(message);
       renderIntakeMessage("assistant", edited.assistant_message);
-      renderResumeEditor();
-      $("#save-state").textContent = "AI 修改已保存";
-      setStepDisabled("jobs", true);
-      invalidateJobAnalysis();
       const confirmAction = $("#generate-from-chat");
       confirmAction.dataset.action = "confirm-resume";
       confirmAction.textContent = "确认简历并发现岗位 →";
@@ -818,18 +825,44 @@ const currentResume = () => state.previewVariant === "polished" ? state.polished
 const currentHometown = () => (state.previewVariant === "polished" ? state.polishedHometown : state.rawHometown) || currentResume()?.personal_info?.hometown || null;
 
 function editable(value, path, className = "", placeholder = "点击编辑") {
-  return `<span class="editable ${className}" contenteditable="true" spellcheck="false" data-path="${escapeHtml(path)}" data-placeholder="${escapeHtml(placeholder)}">${escapeHtml(value || "")}</span>`;
+  const style = state.fieldStyles[path] || {};
+  const inlineStyle = [style.size ? `font-size:${Number(style.size)}pt` : "", style.bold ? "font-weight:700" : "", style.underline ? "text-decoration:underline" : ""].filter(Boolean).join(";");
+  const source = String(value || "");
+  const terms = (style.emphasis || []).filter(term => typeof term === "string" && term.length > 1).sort((a, b) => b.length - a.length);
+  let content = "";
+  for (let index = 0; index < source.length;) {
+    const term = terms.find(item => source.slice(index, index + item.length).toLocaleLowerCase() === item.toLocaleLowerCase());
+    if (term) { content += `<strong class="resume-emphasis">${escapeHtml(source.slice(index, index + term.length))}</strong>`; index += term.length; }
+    else { content += escapeHtml(source[index]); index += 1; }
+  }
+  return `<span class="editable ${className}" contenteditable="true" spellcheck="false" data-path="${escapeHtml(path)}" data-placeholder="${escapeHtml(placeholder)}" style="${inlineStyle}">${content}</span>`;
+}
+
+function updateFieldStyle(node, change) {
+  const path = node?.dataset.path;
+  if (!path) return;
+  const style = {...(state.fieldStyles[path] || {}), ...change};
+  state.fieldStyles[path] = style;
+  node.style.fontSize = style.size ? `${Number(style.size)}pt` : "";
+  node.style.fontWeight = style.bold ? "700" : "";
+  node.style.textDecoration = style.underline ? "underline" : "";
+  renderResumeMobilePreview();
+  scheduleResumeSave();
 }
 
 function renderProfileLinks(links = []) {
   const items = links.map((value, index) => {
+    const match = value.match(/(?:https?:\/\/|www\.)[^\s，。；;<>]+/i);
+    const rawUrl = (match ? match[0] : value).replace(/[.,;:，。；）)]+$/, "");
+    const url = /^www\./i.test(rawUrl) ? `https://${rawUrl}` : rawUrl;
     let href = "";
     try {
-      const parsed = new URL(value);
+      const parsed = new URL(url);
       if (["http:", "https:"].includes(parsed.protocol)) href = parsed.href;
     } catch { /* Keep malformed historical values editable without opening them. */ }
-    const label = /github\.com/i.test(value) ? "GitHub" : "个人网站";
-    return `<div class="portfolio-link"><span class="link-label">${label}</span>${editable(value, `personal_info.links.${index}`, "", "链接地址")}${href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="打开${label}">↗</a>` : ""}</div>`;
+    const host = href ? new URL(href).hostname.toLowerCase().replace(/^www\./, "") : "";
+    const label = host === "linkedin.com" || host.endsWith(".linkedin.com") ? "LinkedIn" : host === "github.com" || host.endsWith(".github.com") ? "GitHub" : englishResume() ? "Website" : "个人网站";
+    return `<div class="portfolio-link"><span class="link-label">${label}</span>${editable(url, `personal_info.links.${index}`, "", "链接地址")}${href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="打开${label}">↗</a>` : ""}</div>`;
   });
   return items.length ? `<div class="portfolio-links" aria-label="个人网站与作品链接">${items.join("")}</div>` : "";
 }
@@ -883,6 +916,76 @@ function renderResumeEditor() {
   window.CareerResumeStudio?.refresh();
 }
 
+function updateResumeEditorText(before, after) {
+  const collections = ["educations", "work_experiences", "internships", "project_experiences", "campus_experiences"];
+  if (Boolean(before.summary) !== Boolean(after.summary) ||
+      Boolean(before.skills?.length) !== Boolean(after.skills?.length) ||
+      Boolean(before.personal_info?.location) !== Boolean(after.personal_info?.location) ||
+      Boolean(before.personal_info?.hometown) !== Boolean(after.personal_info?.hometown) ||
+      (before.personal_info?.links || []).length !== (after.personal_info?.links || []).length) return false;
+  if (collections.some(key => (before[key] || []).length !== (after[key] || []).length ||
+      (before[key] || []).some((item, index) => item.id !== after[key][index]?.id))) return false;
+  const valueAt = (resume, path) => {
+    if (path === "__skills__") return (resume.skills || []).map(item => item.name).join("、");
+    if (path === "__hometown__") return resume.personal_info?.hometown || "";
+    return path.split(".").reduce((value, part) => value?.[part], resume) ?? "";
+  };
+  const updates = [];
+  for (const node of $$("#resume-editor .editable")) {
+    const previous = valueAt(before, node.dataset.path);
+    const next = valueAt(after, node.dataset.path);
+    if (typeof next !== "string") continue;
+    if (String(previous) !== next) updates.push([node, next]);
+  }
+  const renderedPaths = new Set($$("#resume-editor .editable").map(node => node.dataset.path));
+  if ((before.summary || "") !== (after.summary || "") && !renderedPaths.has("summary")) return false;
+  for (const [node, value] of updates) node.textContent = value;
+  renderResumeMobilePreview();
+  return true;
+}
+
+async function runResumeAgentEdit(message) {
+  commitAllResumeFields();
+  await saveResume();
+  const candidateId = state.candidateId;
+  const variant = state.previewVariant;
+  const beforeAgent = structuredClone(currentResume());
+  const beforeOrder = JSON.stringify(state.sectionOrder);
+  const beforeTemplate = state.templateId;
+  const beforeLineSpacing = state.lineSpacing;
+  const beforeSectionSpacing = state.sectionSpacing;
+  const beforeStyles = JSON.stringify(state.fieldStyles);
+  const beforePhoto = state.photoAsset;
+  const agentStartVersion = resumeEditVersion;
+  const result = await api("/api/resume/agent", {method: "POST", body: JSON.stringify({candidate_id: candidateId, variant, message})});
+  if (candidateId !== state.candidateId || variant !== state.previewVariant) throw new Error("会话或简历版本已切换，请在当前页面重新发送修改要求。");
+  const beforeFinalCommit = JSON.stringify(currentResume());
+  commitAllResumeFields();
+  if (JSON.stringify(currentResume()) !== beforeFinalCommit) scheduleResumeSave();
+  if (resumeEditVersion !== agentStartVersion) {
+    await saveResume();
+    throw new Error("AI 处理期间你又编辑了简历，已保留人工修改。请重新发送这条修改要求。");
+  }
+  if (variant === "polished") state.polishedResume = result.resume;
+  else state.rawResume = result.resume;
+  if (result.section_order) state.sectionOrder = result.section_order;
+  if (result.template_id) state.templateId = result.template_id;
+  if (result.line_spacing) state.lineSpacing = result.line_spacing;
+  if (result.section_spacing != null) state.sectionSpacing = result.section_spacing;
+  if (result.field_styles) state.fieldStyles = result.field_styles;
+  if (Object.prototype.hasOwnProperty.call(result, "photo_asset")) state.photoAsset = result.photo_asset;
+  if (variant === "polished") state.polishedHometown = result.hometown || result.resume.personal_info.hometown || null;
+  else state.rawHometown = result.hometown || result.resume.personal_info.hometown || null;
+  if (beforeOrder !== JSON.stringify(state.sectionOrder) || beforeTemplate !== state.templateId ||
+      beforeLineSpacing !== state.lineSpacing || beforeSectionSpacing !== state.sectionSpacing ||
+      beforeStyles !== JSON.stringify(state.fieldStyles) || beforePhoto !== state.photoAsset ||
+      !updateResumeEditorText(beforeAgent, result.resume)) renderResumeEditor();
+  $("#save-state").textContent = "AI 修改已保存";
+  setStepDisabled("jobs", true);
+  invalidateJobAnalysis();
+  return result;
+}
+
 function renderResumeMobilePreview() {
   const source = $("#resume-editor");
   const canvas = $("#resume-mobile-preview-canvas");
@@ -924,6 +1027,16 @@ function setResumeMobileMode(mode) {
 
 function applyTemplateClass() {
   const editor = $("#resume-editor");
+  editor.style.setProperty("--resume-line-spacing", String(state.lineSpacing));
+  editor.style.setProperty("--resume-section-spacing", `${state.sectionSpacing}px`);
+  const spacingControl = $("#resume-line-spacing");
+  if (spacingControl) spacingControl.value = String(state.lineSpacing);
+  const spacingValue = $("#resume-line-spacing-value");
+  if (spacingValue) spacingValue.textContent = `${Number(state.lineSpacing).toFixed(2).replace(/0$/, "")} 倍`;
+  const sectionSpacingControl = $("#resume-section-spacing");
+  if (sectionSpacingControl) sectionSpacingControl.value = String(state.sectionSpacing);
+  const sectionSpacingValue = $("#resume-section-spacing-value");
+  if (sectionSpacingValue) sectionSpacingValue.textContent = `${state.sectionSpacing} 像素`;
   editor.className = `resume-paper template-${state.templateId}`;
   const layout = state.templateId === "modern" ? "banner" : state.templateId === "classic" ? "editorial" :
     state.templateId === "minimal" ? "sidebar" : (state.customTheme?.layout || "editorial");
@@ -953,7 +1066,7 @@ function setByPath(target, path, value) {
   node[parts.at(-1)] = value || null;
 }
 
-function updateEditorValue(node) {
+function updateEditorValue(node, shouldSave = true) {
   const resume = currentResume();
   const value = node.textContent.replace(/\u00a0/g, " ").trim();
   const path = node.dataset.path;
@@ -976,7 +1089,7 @@ function updateEditorValue(node) {
   } else if (path.endsWith(".technologies")) {
     setByPath(resume, path, value.split(/[,，、;；|\n·]+/).map((item) => item.trim()).filter(Boolean));
   } else setByPath(resume, path, value);
-  scheduleResumeSave();
+  if (shouldSave) scheduleResumeSave();
 }
 
 let draggedResumeSection = null;
@@ -987,23 +1100,50 @@ function syncSectionOrderFromCanvas() {
   state.sectionOrder = [...visible, ...hidden];
 }
 
+function commitFocusedResumeField() {
+  const node = document.activeElement;
+  if (node?.matches?.("#resume-editor .editable") && node.isConnected) updateEditorValue(node);
+}
+
+function commitAllResumeFields() {
+  $$("#resume-editor .editable").forEach((node) => {
+    if (node.isConnected) updateEditorValue(node, false);
+  });
+}
+
+function refreshSectionControls() {
+  const sections = $$("#resume-editor .editable-section");
+  sections.forEach((section, index) => {
+    const up = section.querySelector('[data-direction="-1"]');
+    const down = section.querySelector('[data-direction="1"]');
+    if (up) up.disabled = index === 0;
+    if (down) down.disabled = index === sections.length - 1;
+  });
+  renderResumeMobilePreview();
+}
+
 function moveResumeSection(sectionKey, direction) {
-  const visible = $$("#resume-editor .editable-section").map((section) => section.dataset.section);
-  const currentIndex = visible.indexOf(sectionKey);
-  const targetKey = visible[currentIndex + direction];
-  if (currentIndex < 0 || !targetKey) return;
-  const nextOrder = [...state.sectionOrder];
-  const sourceIndex = nextOrder.indexOf(sectionKey);
-  const targetIndex = nextOrder.indexOf(targetKey);
-  [nextOrder[sourceIndex], nextOrder[targetIndex]] = [nextOrder[targetIndex], nextOrder[sourceIndex]];
-  state.sectionOrder = nextOrder;
-  renderResumeEditor();
+  commitAllResumeFields();
+  const sections = $$("#resume-editor .editable-section");
+  const currentIndex = sections.findIndex((section) => section.dataset.section === sectionKey);
+  const target = sections[currentIndex + direction];
+  if (currentIndex < 0 || !target) return;
+  const source = sections[currentIndex];
+  source.parentElement.insertBefore(source, direction < 0 ? target : target.nextSibling);
+  syncSectionOrderFromCanvas();
+  refreshSectionControls();
   scheduleResumeSave();
 }
 
 function bindResumeInteractions() {
   $$("#resume-editor .editable").forEach((node) => {
     node.addEventListener("input", () => updateEditorValue(node));
+    node.addEventListener("compositionend", () => updateEditorValue(node));
+    node.addEventListener("blur", () => {
+      if (!node.isConnected) return;
+      updateEditorValue(node);
+      saveResume().catch(() => {});
+    });
     node.addEventListener("keydown", (event) => { if (event.key === "Enter" && !node.classList.contains("block-editable")) { event.preventDefault(); node.blur(); } });
     if (node.classList.contains("section-title-editable")) node.addEventListener("blur", () => {
       if (!node.textContent.trim()) renderResumeEditor();
@@ -1059,8 +1199,9 @@ function bindResumeInteractions() {
       draggedResumeSection = null;
       if (moving) {
         moving = false;
+        commitAllResumeFields();
         syncSectionOrderFromCanvas();
-        renderResumeEditor();
+        refreshSectionControls();
         scheduleResumeSave();
       }
     };
@@ -1068,24 +1209,46 @@ function bindResumeInteractions() {
 }
 
 function resumePayload() {
-  return {candidate_id: state.candidateId, variant: state.previewVariant, resume: currentResume(), hometown: currentHometown(), section_order: state.sectionOrder, template_id: state.templateId, design_id: state.activeDesignId};
+  return {candidate_id: state.candidateId, variant: state.previewVariant, resume: currentResume(), hometown: currentHometown(), section_order: state.sectionOrder, template_id: state.templateId, design_id: state.activeDesignId, line_spacing: state.lineSpacing, section_spacing: state.sectionSpacing, field_styles: state.fieldStyles};
 }
+
+$("#resume-line-spacing")?.addEventListener("input", (event) => {
+  state.lineSpacing = Number(event.target.value);
+  applyTemplateClass();
+  renderResumeMobilePreview();
+  scheduleResumeSave();
+});
+$("#resume-section-spacing")?.addEventListener("input", (event) => {
+  state.sectionSpacing = Number(event.target.value);
+  applyTemplateClass();
+  renderResumeMobilePreview();
+  scheduleResumeSave();
+});
 
 let resumeSaveTimer;
 let resumeSavePromise = Promise.resolve();
+let resumeEditVersion = 0;
 function scheduleResumeSave() {
-  clearTimeout(resumeSaveTimer); $("#save-state").textContent = "正在编辑…"; setStepDisabled("jobs", true); invalidateJobAnalysis(); resumeSaveTimer = setTimeout(() => saveResume(), 650);
+  resumeEditVersion += 1;
+  try { localStorage.setItem(resumeDraftKey(), JSON.stringify(resumePayload())); } catch { /* Continue saving to the server. */ }
+  clearTimeout(resumeSaveTimer); $("#save-state").textContent = "正在编辑…"; setStepDisabled("jobs", true); invalidateJobAnalysis(); resumeSaveTimer = setTimeout(() => saveResume().catch(() => {}), 650);
 }
 
 async function saveResume(endpoint = "/api/resume/edit") {
   clearTimeout(resumeSaveTimer);
+  resumeSaveTimer = null;
   if (!currentResume()) return;
   $("#save-state").textContent = "正在保存…";
-  resumeSavePromise = api(endpoint, {method: "POST", body: JSON.stringify(resumePayload())});
+  const version = resumeEditVersion;
+  const payload = JSON.stringify(resumePayload());
+  const savedCandidateId = state.candidateId;
+  resumeSavePromise = resumeSavePromise.catch(() => {}).then(() => api(endpoint, {method: "POST", body: payload}));
   try {
     const result = await resumeSavePromise;
-    if (result.resume) { if (state.previewVariant === "polished") state.polishedResume = result.resume; else state.rawResume = result.resume; }
-    $("#save-state").textContent = endpoint.endsWith("confirm") ? "已确认" : "已自动保存";
+    if (version === resumeEditVersion && savedCandidateId === state.candidateId) {
+      localStorage.removeItem(resumeDraftKey());
+      $("#save-state").textContent = endpoint.endsWith("confirm") ? "已确认" : "已自动保存";
+    }
     return result;
   } catch (error) { $("#save-state").textContent = "保存失败"; toast(error.message); throw error; }
 }
@@ -1100,8 +1263,20 @@ $$("#view-resume .download-button").forEach((button) => button.addEventListener(
   if (!currentResume()) return;
   try {
     await saveResume();
-    renderResumeEditor();
     const format = button.dataset.format;
+    if (format === "docx") {
+      const response = await fetch(appUrl(`/api/resume/download/${state.previewVariant}/docx?candidate_id=${encodeURIComponent(state.candidateId)}`), {headers: {"X-Workspace-Key": workspaceKey}});
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `下载失败（${response.status}）`);
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url; link.download = "简历.docx";
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return;
+    }
     const preview = $("#resume-editor").cloneNode(true);
     preview.querySelectorAll(".resume-section-controls, .drag-hint, .section-drag-handle").forEach((node) => node.remove());
     preview.querySelectorAll("[contenteditable]").forEach((node) => node.removeAttribute("contenteditable"));
@@ -1128,6 +1303,7 @@ $$("#view-resume .download-button").forEach((button) => button.addEventListener(
 $("#toggle-polish").addEventListener("click", async () => {
   await saveResume();
   state.previewVariant = state.previewVariant === "polished" ? "raw" : "polished";
+  localStorage.setItem(resumeVariantKey(), state.previewVariant);
   setStepDisabled("jobs", true);
   invalidateJobAnalysis();
   renderResumeEditor();
@@ -1199,31 +1375,9 @@ $("#resume-agent-form").addEventListener("submit", async (event) => {
   submitButton.textContent = "修改中…";
   $("#resume-agent-form").setAttribute("aria-busy", "true");
   try {
-    if (/(不要|别|不放|不加|去掉|删除|移除|删掉|隐藏).{0,12}(照片|头像)|(照片|头像).{0,12}(不要|别放|去掉|删除|移除|删掉|隐藏)/.test(message)) {
-      const result = await api("/api/resume/remove-photo", {method: "POST", body: JSON.stringify({candidate_id: state.candidateId})});
-      state.photoAsset = null;
-      progress.textContent = result.assistant_message;
-      renderResumeEditor();
-      return;
-    }
-    await saveResume();
-    const result = await api("/api/resume/agent", {
-      method: "POST",
-      body: JSON.stringify({candidate_id: state.candidateId, variant: state.previewVariant, message}),
-    });
-    if (state.previewVariant === "polished") state.polishedResume = result.resume;
-    else state.rawResume = result.resume;
-    if (result.section_order) state.sectionOrder = result.section_order;
-    if (result.template_id) state.templateId = result.template_id;
-    if (Object.prototype.hasOwnProperty.call(result, "photo_asset")) state.photoAsset = result.photo_asset;
-    if (state.previewVariant === "polished") state.polishedHometown = result.hometown || result.resume.personal_info.hometown || null;
-    else state.rawHometown = result.hometown || result.resume.personal_info.hometown || null;
-    renderResumeEditor();
+    const result = await runResumeAgentEdit(message);
     progress.remove();
     addAgentMessage("assistant", result.assistant_message);
-    $("#save-state").textContent = "AI 修改已保存";
-    setStepDisabled("jobs", true);
-    invalidateJobAnalysis();
   } catch (error) {
     progress.remove();
     addAgentMessage("assistant error", `修改失败：${error.message}`);

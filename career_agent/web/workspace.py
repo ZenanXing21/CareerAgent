@@ -29,6 +29,10 @@ class CandidateRecord(BaseModel):
     confirmed: bool = False
     template_id: str = "modern"
     section_order: list[str] = Field(default_factory=list)
+    line_spacing: float = 1.85
+    section_spacing: int = 18
+    field_styles: dict[str, dict[str, object]] = Field(default_factory=dict)
+    edit_revision: int = 0
     custom_template_base64: str | None = None
     jobs: dict[str, Job] = Field(default_factory=dict)
     tailored_results: dict[str, TailoredJobResult] = Field(default_factory=dict)
@@ -61,6 +65,8 @@ class WorkspaceRecords(BaseModel):
     intakes: dict[str, IntakeRecord] = Field(default_factory=dict)
     sessions_meta: dict[str, str] = Field(default_factory=dict)
     session_owners: dict[str, str] = Field(default_factory=dict)
+    installed_style_skills: dict[str, list[dict[str, str]]] = Field(default_factory=dict)
+    talent_pools: dict[str, dict] = Field(default_factory=dict)
 
 
 def candidate_from_record(record: CandidateRecord, factory):
@@ -69,6 +75,9 @@ def candidate_from_record(record: CandidateRecord, factory):
         for item in fields(factory)
         if item.name != "custom_template"
     }
+    if not values.get("section_order"):
+        from career_agent.resume.editor import normalize_section_order
+        values["section_order"] = normalize_section_order([])
     values["custom_template"] = (
         base64.b64decode(record.custom_template_base64, validate=True)
         if record.custom_template_base64
@@ -100,7 +109,9 @@ class WorkspaceStore:
         return WorkspaceRecords.model_validate_json(self.path.read_text(encoding="utf-8"))
 
     def snapshot(self, candidates: dict, intakes: dict, sessions_meta: dict[str, str] | None = None,
-                 session_owners: dict[str, str] | None = None) -> str:
+                 session_owners: dict[str, str] | None = None,
+                 installed_style_skills: dict[str, list[dict[str, str]]] | None = None,
+                 talent_pools: dict[str, dict] | None = None) -> str:
         records = {}
         for key, candidate in candidates.items():
             values = {
@@ -120,7 +131,9 @@ class WorkspaceStore:
         }
         return WorkspaceRecords(candidates=records, intakes=intake_records,
                                 sessions_meta=sessions_meta or {},
-                                session_owners=session_owners or {}).model_dump_json()
+                                session_owners=session_owners or {},
+                                installed_style_skills=installed_style_skills or {},
+                                talent_pools=talent_pools or {}).model_dump_json()
 
     def write(self, data: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

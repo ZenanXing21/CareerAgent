@@ -15,6 +15,14 @@ LABELS = {
 }
 
 
+def requested_section_removal(message: str) -> str | None:
+    """Recognize an explicit request to remove a whole resume section."""
+    target = r"(?<!教育)(?<!工作)(?<!实习)(?<!校园)(?<!项目)经历(?:这个|那一块|这一块|模块|栏目|部分)?|项目经历|项目经验"
+    action = r"删掉|删除|全删|整个删|去掉|移除|不要|不保留"
+    whole = rf"(?:{action}).{{0,14}}(?:{target})|(?:{target}).{{0,14}}(?:{action})"
+    return "experience" if re.search(whole, message) else None
+
+
 def requested_format(message: str, current_order: list[str], current_template: str) -> tuple[list[str], str] | None:
     if not re.search(r"格式|排版|版式|模板|布局|顺序|排序|放前|放后|置顶|置底|layout|format", message, re.I):
         return None

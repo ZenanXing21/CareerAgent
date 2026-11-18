@@ -78,7 +78,7 @@
   function showToolbar(node, event) {
     const path = node?.dataset.path || "";
     const isContent = path === "summary" || path === "__skills__" || path.endsWith(".description");
-    if (!isContent) {
+    if (!path) {
       if (event?.type === "pointerover" && activeField && !toolbar.classList.contains("hidden")) {
         scheduleToolbarHide();
         return;
@@ -96,9 +96,21 @@
     }
     activeField = node;
     toolbar.classList.remove("hidden");
-    toolbar.querySelector('[data-text-action="optimize"]').disabled = false;
-    toolbar.querySelector('[data-text-action="shorten"]').disabled = false;
+    toolbar.querySelector('[data-text-action="optimize"]').disabled = !isContent;
+    toolbar.querySelector('[data-text-action="shorten"]').disabled = !isContent;
     toolbar.querySelector('[data-text-action="undo"]').disabled = !undo.has(`${state.previewVariant}:${node.dataset.path}`);
+    const fieldStyle = state.fieldStyles[path] || {};
+    $("#field-font-size").value = fieldStyle.size ? String(fieldStyle.size) : "";
+    const spacingSelect = $("#field-line-spacing");
+    spacingSelect.querySelector("[data-custom-spacing]")?.remove();
+    if (![...spacingSelect.options].some((option) => Number(option.value) === Number(state.lineSpacing))) {
+      const option = document.createElement("option");
+      option.value = String(state.lineSpacing); option.textContent = String(state.lineSpacing);
+      option.dataset.customSpacing = "true"; spacingSelect.appendChild(option);
+    }
+    spacingSelect.value = String(state.lineSpacing);
+    toolbar.querySelector('[data-format-action="bold"]').setAttribute("aria-pressed", String(Boolean(fieldStyle.bold)));
+    toolbar.querySelector('[data-format-action="underline"]').setAttribute("aria-pressed", String(Boolean(fieldStyle.underline)));
     const width = toolbar.offsetWidth;
     const height = toolbar.offsetHeight;
     const optimize = toolbar.querySelector('[data-text-action="optimize"]');
@@ -147,7 +159,17 @@
   });
   toolbar.addEventListener("pointerenter", cancelToolbarHide);
   toolbar.addEventListener("focusin", cancelToolbarHide);
-  toolbar.addEventListener("pointerdown", (event) => event.preventDefault());
+  toolbar.addEventListener("pointerdown", (event) => { if (event.target.closest("button")) event.preventDefault(); });
+  $("#field-font-size").addEventListener("change", (event) => {
+    if (!activeField?.isConnected) return;
+    updateFieldStyle(activeField, {size: event.target.value ? Number(event.target.value) : null});
+  });
+  $("#field-line-spacing").addEventListener("change", (event) => {
+    state.lineSpacing = Number(event.target.value);
+    applyTemplateClass();
+    renderResumeMobilePreview();
+    scheduleResumeSave();
+  });
   window.addEventListener("resize", hideToolbar);
   $("#intake-scroll-region").addEventListener("scroll", () => {
     if (activeField?.isConnected && document.activeElement === activeField) showToolbar(activeField);
@@ -155,6 +177,13 @@
   });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") hideToolbar(); });
   toolbar.addEventListener("click", async (event) => {
+    const formatAction = event.target.closest("[data-format-action]")?.dataset.formatAction;
+    if (formatAction && activeField?.isConnected) {
+      const next = !Boolean((state.fieldStyles[activeField.dataset.path] || {})[formatAction]);
+      updateFieldStyle(activeField, {[formatAction]: next});
+      event.target.closest("[data-format-action]").setAttribute("aria-pressed", String(next));
+      return;
+    }
     const action = event.target.closest("[data-text-action]")?.dataset.textAction;
     if (!action || !activeField?.isConnected || optimizing) return;
     const node = activeField;
@@ -252,6 +281,48 @@
     if (!popover.classList.contains("hidden") || !launcher.classList.contains("hidden")) positionTemplateAgent();
   });
 
+  async function refreshStyleSkills() {
+    try {
+      const result = await api("/api/design/skills");
+      const picker = $("#template-skill-picker");
+      picker.replaceChildren();
+      const label = document.createElement("small");
+      label.textContent = "选择本次排版使用的 Skill";
+      picker.appendChild(label);
+      for (const skill of result.skills) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = skill.name;
+        button.title = skill.description;
+        button.setAttribute("aria-pressed", String(selectedSkills.has(skill.id)));
+        button.addEventListener("click", () => {
+          if (selectedSkills.has(skill.id)) selectedSkills.delete(skill.id);
+          else selectedSkills.add(skill.id);
+          button.setAttribute("aria-pressed", String(selectedSkills.has(skill.id)));
+        });
+        picker.appendChild(button);
+        if (skill.id.startsWith("installed-")) {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "skill-remove";
+          remove.textContent = "×";
+          remove.title = `删除 ${skill.name}`;
+          remove.setAttribute("aria-label", remove.title);
+          remove.addEventListener("click", async () => {
+            try {
+              await api(`/api/design/skills/${encodeURIComponent(skill.id)}`, {method: "DELETE"});
+              selectedSkills.delete(skill.id);
+              await refreshStyleSkills();
+            } catch (error) { toast(error.message); }
+          });
+          picker.appendChild(remove);
+        }
+      }
+      if (!result.skills.length) label.textContent = "暂无可用设计技能";
+      if (!floatingPosition) positionTemplateAgent();
+    } catch (error) { toast(error.message); }
+  }
+
   async function openTemplateAgent() {
     popover.classList.remove("hidden");
     launcher.classList.add("hidden");
@@ -260,30 +331,86 @@
       if (!floatingPosition && !popover.classList.contains("hidden")) positionTemplateAgent();
     });
     $("#template-agent-input").focus();
-    if ($("#template-skill-picker").children.length) return;
-    try {
-      const result = await api("/api/design/skills");
-      const picker = $("#template-skill-picker");
-      const label = document.createElement("small");
-      label.textContent = "本次调用技能（需手动选择）";
-      picker.appendChild(label);
-      for (const skill of result.skills) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = skill.name;
-        button.title = skill.description;
-        button.setAttribute("aria-pressed", "false");
-        button.addEventListener("click", () => {
-          if (selectedSkills.has(skill.id)) selectedSkills.delete(skill.id);
-          else selectedSkills.add(skill.id);
-          button.setAttribute("aria-pressed", String(selectedSkills.has(skill.id)));
-        });
-        picker.appendChild(button);
-      }
-      if (!result.skills.length) label.textContent = "暂无可用设计技能";
-      if (!floatingPosition) positionTemplateAgent();
-    } catch (error) { toast(error.message); }
+    await refreshStyleSkills();
   }
+
+  $("#style-skill-file").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      if (file.size > 20000) throw new Error("Skill 文件不能超过 20 KB");
+      const installed = await api("/api/design/skills", {method: "POST", body: JSON.stringify({name: file.name.replace(/\.md$/i, ""), content: await file.text()})});
+      selectedSkills.add(installed.id);
+      await refreshStyleSkills();
+      toast(`已安装并选中 ${installed.name}`);
+    } catch (error) { toast(error.message); }
+    event.target.value = "";
+  });
+
+  $("#style-skill-url-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = $("#style-skill-url");
+    try {
+      const installed = await api("/api/design/skills", {method: "POST", body: JSON.stringify({github_url: input.value.trim()})});
+      selectedSkills.add(installed.id);
+      await refreshStyleSkills();
+      input.value = "";
+      toast(`已安装并选中 ${installed.name}`);
+    } catch (error) { toast(error.message); }
+  });
+
+  let mcpStyleSources = [];
+  $("#mcp-style-connect-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector("button");
+    button.disabled = true;
+    try {
+      const result = await api("/api/design/mcp/sources", {method: "POST", body: JSON.stringify({
+        url: $("#mcp-style-url").value.trim(), token: $("#mcp-style-token").value || null,
+      })});
+      mcpStyleSources = result.sources || [];
+      const select = $("#mcp-style-source");
+      select.replaceChildren();
+      mcpStyleSources.forEach((source, index) => {
+        const option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = `${source.kind === "tool" ? "工具" : "资源"} · ${source.name}`;
+        option.title = source.description || "";
+        select.appendChild(option);
+      });
+      $("#mcp-style-import-form").classList.toggle("hidden", !mcpStyleSources.length);
+      if (mcpStyleSources.length) $("#mcp-style-source").dispatchEvent(new Event("change"));
+      toast(mcpStyleSources.length ? `发现 ${mcpStyleSources.length} 项 MCP 内容` : "这个 MCP 服务器没有可用工具或文本资源");
+    } catch (error) { toast(error.message); }
+    finally { button.disabled = false; }
+  });
+
+  $("#mcp-style-source").addEventListener("change", (event) => {
+    const source = mcpStyleSources[Number(event.target.value)];
+    $("#mcp-style-arguments").disabled = source?.kind === "resource";
+    $("#mcp-style-schema").textContent = source?.kind === "tool" ? `参数格式：${JSON.stringify(source.input_schema || {})}` : "文本资源无需参数";
+  });
+
+  $("#mcp-style-import-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const source = mcpStyleSources[Number($("#mcp-style-source").value)];
+    if (!source) return;
+    const button = event.currentTarget.querySelector("button");
+    button.disabled = true;
+    try {
+      const argumentsValue = source.kind === "tool" ? JSON.parse($("#mcp-style-arguments").value || "{}") : {};
+      if (!argumentsValue || Array.isArray(argumentsValue) || typeof argumentsValue !== "object") throw new Error("工具参数必须是 JSON 对象");
+      const installed = await api("/api/design/mcp/import", {method: "POST", body: JSON.stringify({
+        url: $("#mcp-style-url").value.trim(), token: $("#mcp-style-token").value || null,
+        kind: source.kind, name: source.name, arguments: argumentsValue,
+      })});
+      selectedSkills.add(installed.id);
+      await refreshStyleSkills();
+      toast(`已安装并选中 ${installed.name}`);
+    } catch (error) { toast(error.message); }
+    finally { button.disabled = false; }
+  });
 
   $("#minimize-template-agent").addEventListener("click", () => {
     popover.classList.add("hidden"); launcher.classList.remove("hidden");

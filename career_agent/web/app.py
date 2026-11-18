@@ -47,6 +47,7 @@ from career_agent.resume.editor import (
     confirm_user_edited_resume,
     normalize_section_order,
     preserve_unrequested_resume_facts,
+    space_numbered_points,
 )
 from career_agent.resume.exporter import (
     inspect_docx_template,
@@ -56,6 +57,7 @@ from career_agent.resume.exporter import (
 )
 from career_agent.resume.inspector import inspect_resume
 from career_agent.resume.models import Resume, Skill
+from career_agent.resume.talent_pool import add_fact, collect_resume, collect_user_message, delete_fact, relevant_facts
 from career_agent.resume.studio import (
     DesignedResumeTemplate,
     SavedResumeTemplate,
@@ -101,6 +103,10 @@ class CandidateSession:
     template_proposal: SavedResumeTemplate | None = None
     template_chat: list[dict[str, str]] = field(default_factory=list)
     semantic_keywords: list[str] = field(default_factory=list)
+    line_spacing: float = 1.85
+    section_spacing: int = 18
+    field_styles: dict[str, dict[str, Any]] = field(default_factory=dict)
+    edit_revision: int = 0
 
 
 @dataclass
@@ -145,6 +151,9 @@ class ResumeEditRequest(BaseModel):
     section_order: list[str] = Field(default_factory=list)
     template_id: Literal["modern", "classic", "minimal", "custom", "designed"] = "modern"
     design_id: str | None = None
+    line_spacing: float = Field(default=1.85, ge=1.35, le=2.4)
+    section_spacing: int = Field(default=18, ge=6, le=48)
+    field_styles: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class ResumeConfirmRequest(ResumeEditRequest):
@@ -198,6 +207,23 @@ class TemplateDesignRequest(BaseModel):
     candidate_id: str
     message: str = Field(min_length=1, max_length=3000)
     skill_ids: list[str] = Field(default_factory=list, max_length=5)
+
+
+class StyleSkillInstallRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=60)
+    content: str | None = Field(default=None, max_length=20000)
+    github_url: str | None = Field(default=None, max_length=1000)
+
+
+class McpStyleConnectRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=1000)
+    token: str | None = Field(default=None, max_length=2000)
+
+
+class McpStyleImportRequest(McpStyleConnectRequest):
+    kind: Literal["tool", "resource"]
+    name: str = Field(min_length=1, max_length=300)
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class TemplateSelectionRequest(BaseModel):
@@ -464,7 +490,7 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         response.headers["Cache-Control"] = "no-store"
         if store and request.method in {"POST", "PATCH", "DELETE"} and response.status_code < 400:
             async with save_lock:
-                data = store.snapshot(sessions, intake_sessions, sessions_meta, session_owners)
+                data = store.snapshot(sessions, intake_sessions, sessions_meta, session_owners, installed_style_skills, talent_pools)
                 await asyncio.to_thread(store.write, data)
         return response
 
@@ -472,12 +498,16 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
     intake_sessions: dict[str, IntakeConversationSession] = {}
     sessions_meta: dict[str, str] = {}
     session_owners: dict[str, str] = {}
+    installed_style_skills: dict[str, list[dict[str, str]]] = {}
+    talent_pools: dict[str, dict] = {}
     store = WorkspaceStore(state_file) if state_file else None
     save_lock = asyncio.Lock()
     if store:
         saved = store.load()
         sessions_meta.update(saved.sessions_meta)
         session_owners.update(saved.session_owners)
+        installed_style_skills.update(saved.installed_style_skills)
+        talent_pools.update(saved.talent_pools)
         sessions.update(
             {
                 key: candidate_from_record(value, CandidateSession)
@@ -497,7 +527,7 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
     @application.middleware("http")
     async def isolate_workspaces(request: Request, call_next: Any) -> Response:
         path = request.url.path
-        if not path.startswith("/api/") or path in {"/api/status", "/api/design/skills"}:
+        if not path.startswith("/api/") or path == "/api/status":
             return await call_next(request)
         secret = request.headers.get("x-workspace-key", "")
         if len(secret) < 32:
@@ -547,6 +577,9 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             candidate.designed_templates.append(legacy)
             candidate.active_design_id = legacy.id
         return candidate
+
+    def talent_pool(request: Request) -> dict:
+        return talent_pools.setdefault(request.state.workspace_owner, {"facts": {}, "deleted": []})
 
     def select_design(candidate: CandidateSession, template_id: str) -> None:
         template = next(
@@ -600,6 +633,9 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             for name in (
                 "template_id",
                 "section_order",
+                "line_spacing",
+                "section_spacing",
+                "field_styles",
                 "custom_template",
                 "designed_template",
                 "designed_templates",
@@ -610,6 +646,7 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
                 "resume_chat",
                 "resume_memory",
                 "resume_revisions",
+                "edit_revision",
             ):
                 setattr(generated, name, getattr(previous, name))
         sessions[draft.candidate_id] = generated
@@ -625,6 +662,7 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         if request.template_id == "designed" and candidate.designed_template is None:
             raise HTTPException(status_code=400, detail="请先生成自定义模板")
         edited = confirm_user_edited_resume(Resume.model_validate(request.resume, strict=False))
+        candidate.edit_revision += 1
         hometown = request.hometown or edited.personal_info.hometown
         edited = edited.model_copy(
             update={"personal_info": edited.personal_info.model_copy(update={"hometown": hometown})}
@@ -637,6 +675,15 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             candidate.polished_hometown = hometown
         candidate.template_id = request.template_id
         candidate.section_order = normalize_section_order(request.section_order)
+        candidate.line_spacing = request.line_spacing
+        candidate.section_spacing = request.section_spacing
+        candidate.field_styles = {
+            path: {"size": max(8, min(24, float(style["size"]))) if isinstance(style.get("size"), (int, float)) else None,
+                   "bold": bool(style.get("bold", False)), "underline": bool(style.get("underline", False)),
+                   "emphasis": [term[:80] for term in style.get("emphasis", [])[:30] if isinstance(term, str) and len(term) >= 2] if isinstance(style.get("emphasis", []), list) else []}
+            for path, style in request.field_styles.items()
+            if isinstance(style, dict) and re.fullmatch(r"(?:summary|__skills__|section_titles\.[a-z]+|personal_info\.[a-z]+|(?:educations|work_experiences|internships|project_experiences|campus_experiences)\.\d+\.[a-z_]+)", path)
+        }
         candidate.confirmed = False
         candidate.confirmed_resume = None
         return edited
@@ -671,6 +718,18 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="找不到该任务会话")
         sessions_meta[session_id] = request.title.strip()
         return {"id": session_id, "title": sessions_meta[session_id]}
+
+    @application.get("/api/talent-pool")
+    async def read_talent_pool(request: Request, jd: str = "") -> dict[str, object]:
+        pool = talent_pool(request)
+        return {"facts": list(pool.get("facts", {}).values()),
+                "relevant": relevant_facts(pool, jd) if jd else []}
+
+    @application.delete("/api/talent-pool/{kind}/{value}")
+    async def remove_talent_fact(request: Request, kind: str, value: str) -> dict[str, bool]:
+        if kind not in {"skill", "experience"}:
+            raise HTTPException(status_code=422, detail="不支持的人才池事实类型")
+        return {"deleted": delete_fact(talent_pool(request), kind, value)}
 
     @application.delete("/api/sessions/{session_id}")
     async def delete_task_session(session_id: str) -> dict[str, bool]:
@@ -719,7 +778,7 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         return result.model_dump(mode="json")
 
     @application.post("/api/intake/chat")
-    async def conversational_intake(request: IntakeChatRequest) -> dict[str, object]:
+    async def conversational_intake(request: IntakeChatRequest, http_request: Request) -> dict[str, object]:
         product_service, _ = get_dependencies()
         intake = intake_sessions.setdefault(
             request.candidate_id,
@@ -834,6 +893,10 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             )
         intake.messages.append({"role": "assistant", "content": assistant_message})
         intake.messages = intake.messages[-20:]
+        pool = talent_pool(http_request)
+        collect_user_message(pool, request.message, request.candidate_id)
+        for skill_name in intake.draft.skills:
+            add_fact(pool, "skill", skill_name, request.candidate_id, "intake")
 
         if ready_to_generate:
             result = intake.preview_result
@@ -843,6 +906,8 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             preview_ready = bool(result.ready and result.ai_polished)
             if preview_ready:
                 store_generated_resume(intake.draft, result)
+                if result.resume:
+                    collect_resume(pool, result.resume, request.candidate_id)
             payload = result.model_dump(mode="json")
             payload.update(
                 {
@@ -986,15 +1051,27 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         }
 
     @application.post("/api/resume/edit")
-    async def edit_resume(request: ResumeEditRequest) -> dict[str, object]:
+    async def edit_resume(request: ResumeEditRequest, http_request: Request) -> dict[str, object]:
         candidate = get_session(request.candidate_id)
         previous_resume = candidate.raw_resume if request.variant == "raw" else candidate.display_resume
+        previous_order = list(candidate.section_order)
+        previous_template = candidate.template_id
+        previous_spacing = candidate.line_spacing
+        previous_section_spacing = candidate.section_spacing
         edited = apply_editor_update(candidate, request)
-        candidate.resume_revisions.append({"variant": request.variant, "resume": previous_resume.model_dump(mode="json")})
+        collect_resume(talent_pool(http_request), edited, request.candidate_id)
+        if (edited != previous_resume or candidate.section_order != previous_order
+                or candidate.template_id != previous_template or candidate.line_spacing != previous_spacing
+                or candidate.section_spacing != previous_section_spacing):
+            candidate.resume_revisions.append({"variant": request.variant, "resume": previous_resume.model_dump(mode="json")})
+            candidate.resume_revisions = candidate.resume_revisions[-100:]
         return {
             "saved": True,
             "resume": edited.model_dump(mode="json"),
             "section_order": candidate.section_order,
+            "line_spacing": candidate.line_spacing,
+            "section_spacing": candidate.section_spacing,
+            "field_styles": candidate.field_styles,
             "template_id": candidate.template_id,
         }
 
@@ -1018,13 +1095,100 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             )
         return await edit_resume_with_agent(ResumeAgentRequest(
             candidate_id=request.candidate_id, variant=request.variant, message=message,
-        ))
+        ), request)
 
     @application.post("/api/resume/agent")
-    async def edit_resume_with_agent(request: ResumeAgentRequest) -> dict[str, object]:
+    async def edit_resume_with_agent(request: ResumeAgentRequest, http_request: Request) -> dict[str, object]:
         from career_agent.resume.memory import recall, remember, resume_language
-        from career_agent.resume.formatting import requested_format
+        from career_agent.resume.formatting import requested_format, requested_section_removal
         candidate = get_session(request.candidate_id)
+        pool = talent_pool(http_request)
+        if re.search(r"(?:查看|看看|列出|展示|显示).{0,6}人才池|人才池.{0,6}(?:有什么|有哪些)", request.message):
+            facts = list(pool.get("facts", {}).values())
+            reply = "人才池目前没有记录。" if not facts else "人才池已有：" + "；".join(
+                f"{item['kind']}：{item['text']}" for item in facts[:30])
+            resume = candidate.raw_resume if request.variant == "raw" else candidate.display_resume
+            candidate.resume_chat.extend(({"role": "user", "content": request.message}, {"role": "assistant", "content": reply}))
+            return {"assistant_message": reply, "resume": resume.model_dump(mode="json"), "changed_sections": []}
+        removal_match = re.search(r"(?:从)?人才池(?:中)?(?:删除|移除|忘记)\s*(?:技能)?\s*[:：]?\s*([^。；;\n]+)", request.message)
+        if removal_match:
+            names = [name.strip() for name in re.split(r"[、，,和及]", removal_match.group(1)) if name.strip()]
+            removed = [name for name in names if delete_fact(pool, "skill", name)]
+            reply = "已从人才池删除：" + "、".join(removed) if removed else "人才池中没有找到指定技能。"
+            resume = candidate.raw_resume if request.variant == "raw" else candidate.display_resume
+            candidate.resume_chat.extend(({"role": "user", "content": request.message}, {"role": "assistant", "content": reply}))
+            return {"assistant_message": reply, "resume": resume.model_dump(mode="json"), "changed_sections": []}
+        add_match = re.search(r"(?:重新)?(?:添加|加入|记入)\s*(?:技能)?\s*([^。；;\n]+?)\s*(?:到|进)人才池", request.message)
+        if add_match:
+            names = [name.strip() for name in re.split(r"[、，,和及]", add_match.group(1)) if name.strip()]
+            for name in names:
+                key = "skill:" + re.sub(r"\s+", " ", name).casefold()
+                if key in pool.setdefault("deleted", []):
+                    pool["deleted"].remove(key)
+                add_fact(pool, "skill", name, request.candidate_id, "explicit_user_add")
+            reply = "已加入人才池：" + "、".join(names) if names else "请告诉我要加入的技能。"
+            resume = candidate.raw_resume if request.variant == "raw" else candidate.display_resume
+            candidate.resume_chat.extend(({"role": "user", "content": request.message}, {"role": "assistant", "content": reply}))
+            return {"assistant_message": reply, "resume": resume.model_dump(mode="json"), "changed_sections": []}
+        collect_user_message(pool, request.message, request.candidate_id)
+        if re.search(r"(?:加粗|粗体|bold)", request.message, re.I) and re.search(r"(?:JD|岗位|业务术语|关键词|重合)", request.message, re.I):
+            from career_agent.resume.emphasis import matching_terms, emphasis_styles
+            resume = candidate.raw_resume if request.variant == "raw" else candidate.display_resume
+            history = [item["content"] for item in candidate.resume_chat if item.get("role") == "user"]
+            jd_sources = [text for text in [*history[-30:], request.message]
+                          if len(text) > 100 and re.search(r"(?:JD|岗位|职责|要求|招聘)", text, re.I)]
+            intake = intake_sessions.get(request.candidate_id)
+            if intake and intake.draft.intended_jd:
+                jd_sources.append(intake.draft.intended_jd)
+            jd = "\n".join(jd_sources)
+            terms = matching_terms(resume, jd, candidate.semantic_keywords)
+            if not terms:
+                reply = "当前会话中没有找到与简历正文明确重合的 JD 术语。请粘贴目标岗位 JD，再让我加粗重点术语。"
+            else:
+                for path, style in emphasis_styles(resume, terms).items():
+                    candidate.field_styles[path] = {**candidate.field_styles.get(path, {}), **style}
+                reply = "已加粗简历中与当前 JD 重合的术语：" + "、".join(terms[:12]) + "。"
+            candidate.resume_chat.extend(({"role": "user", "content": request.message}, {"role": "assistant", "content": reply}))
+            return {"assistant_message": reply, "resume": resume.model_dump(mode="json"), "field_styles": candidate.field_styles, "changed_sections": ["术语加粗"] if terms else []}
+        removal = requested_section_removal(request.message)
+        if removal == "experience":
+            resume = candidate.raw_resume if request.variant == "raw" else candidate.display_resume
+            edited = resume.model_copy(update={
+                "project_experiences": [],
+                "section_titles": {key: value for key, value in resume.section_titles.items() if key != "experience"},
+            })
+            candidate.resume_revisions.append({"variant": request.variant, "resume": resume.model_dump(mode="json")})
+            if request.variant == "raw":
+                candidate.raw_resume = edited
+            else:
+                candidate.display_resume = edited
+            candidate.confirmed = False
+            candidate.confirmed_resume = None
+            reply = "已删除“经历”整个模块及其中的内容。"
+            candidate.resume_chat.extend(({"role": "user", "content": request.message}, {"role": "assistant", "content": reply}))
+            return {"assistant_message": reply, "resume": edited.model_dump(mode="json"), "hometown": candidate.raw_hometown if request.variant == "raw" else candidate.polished_hometown, "changed_sections": ["经历"]}
+        if re.search(r"(?:模块|栏目|章节|板块|Education|Skills).{0,16}(?:间距|空白|距离)|(?:间距|空白|距离).{0,16}(?:模块|栏目|章节|板块|Education|Skills)", request.message, re.I):
+            numeric = re.search(r"(\d{1,2})\s*(?:px|像素)", request.message, re.I)
+            if numeric:
+                candidate.section_spacing = max(6, min(48, int(numeric.group(1))))
+            elif re.search(r"(?:缩小|调小|小一点|紧凑|减少|太大|过大)", request.message):
+                candidate.section_spacing = max(6, candidate.section_spacing - 6)
+            else:
+                candidate.section_spacing = min(48, candidate.section_spacing + 6)
+            reply = f"已将模块间距调整为 {candidate.section_spacing} 像素。"
+            candidate.resume_chat.extend(({"role": "user", "content": request.message}, {"role": "assistant", "content": reply}))
+            return {"assistant_message": reply, "resume": (candidate.raw_resume if request.variant == "raw" else candidate.display_resume).model_dump(mode="json"), "section_spacing": candidate.section_spacing, "changed_sections": ["模块间距"]}
+        if re.search(r"(?:行距|行间距|文字间距|正文间距)", request.message) and not re.search(r"(?:补充|增加|新增|改写|翻译|删除).{0,12}(?:经历|技能|内容)", request.message):
+            numeric = re.search(r"(1\.[4-9]|2\.[0-4])\s*(?:倍|行距)?", request.message)
+            if numeric:
+                candidate.line_spacing = float(numeric.group(1))
+            elif re.search(r"(?:紧|小|缩|窄)", request.message):
+                candidate.line_spacing = max(1.35, round(candidate.line_spacing - 0.2, 2))
+            else:
+                candidate.line_spacing = min(2.4, round(candidate.line_spacing + 0.2, 2))
+            reply = f"已将正文行距调整为 {candidate.line_spacing:g} 倍。"
+            candidate.resume_chat.extend(({"role": "user", "content": request.message}, {"role": "assistant", "content": reply}))
+            return {"assistant_message": reply, "resume": (candidate.raw_resume if request.variant == "raw" else candidate.display_resume).model_dump(mode="json"), "line_spacing": candidate.line_spacing, "section_order": candidate.section_order, "template_id": candidate.template_id, "changed_sections": ["行距"]}
         format_change = requested_format(request.message, candidate.section_order, candidate.template_id)
         if format_change and re.search(r"这个格式|上述格式|上面的顺序|按此顺序", request.message):
             for entry in reversed(candidate.resume_chat[-16:]):
@@ -1061,7 +1225,13 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
                     "changed_sections": ["照片"]}
         product_service, _ = get_dependencies()
         resume = candidate.raw_resume if request.variant == "raw" else candidate.display_resume
+        start_revision = candidate.edit_revision
         effective_instruction = request.message
+        jd_text = request.message if re.search(r"(?:JD|岗位要求|招聘要求)", request.message, re.I) else ""
+        if not jd_text:
+            intake = intake_sessions.get(request.candidate_id)
+            jd_text = intake.draft.intended_jd or "" if intake else ""
+        selected_pool_facts = relevant_facts(pool, jd_text)
         from career_agent.resume.language import english_resume
         language = resume_language(candidate.resume_memory, request.message)
         if language == "en" or (language is None and english_resume(resume)):
@@ -1073,6 +1243,9 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
                 "Only an explicit request to change the resume language overrides this.\n"
                 "LATEST REQUEST:\n" + request.message
             )
+        if selected_pool_facts:
+            effective_instruction += "\nTALENT_POOL_RELEVANT_FACTS (user-stated facts; use only when relevant to this JD):\n" + "\n".join(
+                f"- {item['kind']}: {item['text']}" for item in selected_pool_facts)
         try:
             result = await product_service.edit_resume_with_agent(
                 resume=resume,
@@ -1081,12 +1254,34 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             )
         except (LLMError, ValueError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-        edited = preserve_unrequested_resume_facts(resume, result.resume, request.message)
+        if candidate.edit_revision != start_revision:
+            raise HTTPException(status_code=409, detail="AI 处理期间简历又被编辑，请基于最新内容重试；你的人工修改已保留")
+        edited = preserve_unrequested_resume_facts(resume, space_numbered_points(result.resume), request.message)
         edited, explicit_hometown = apply_explicit_profile_edits(edited, request.message)
-        edited = edited.model_copy(
-            update={"section_titles": {**resume.section_titles, **edited.section_titles}}
-        )
+        if re.search(r"整(?:份|个)简历|全文|全部栏目|所有栏目", request.message[:160]):
+            titles = {**resume.section_titles, **edited.section_titles}
+        else:
+            titles = dict(resume.section_titles)
+            for key, value in edited.section_titles.items():
+                if re.search(r"标题|栏目|模块|heading|section", request.message, re.I) and (
+                    key in request.message or re.search({
+                        "summary": r"个人总结|自我评价", "education": r"教育经历|教育背景",
+                        "work": r"工作经历", "internship": r"实习经历",
+                        "experience": r"项目经历|经历", "campus": r"校园经历",
+                        "skills": r"专业技能|技能",
+                    }.get(key, r"$^"), request.message)
+                ):
+                    titles[key] = value
+        edited = edited.model_copy(update={"section_titles": titles})
         edited = apply_explicit_section_title_edits(edited, request.message)
+        selected_skills = {item["text"].casefold(): item["text"] for item in selected_pool_facts if item["kind"] == "skill"}
+        if selected_skills:
+            existing_skills = {item.name.casefold() for item in edited.skills}
+            added = [Skill(name=name, source_text=f"人才池记录的技能：{name}")
+                     for key, name in selected_skills.items()
+                     if key in {item.name.casefold() for item in result.resume.skills} and key not in existing_skills]
+            if added:
+                edited = edited.model_copy(update={"skills": [*edited.skills, *added]})
         hometown = (
             explicit_hometown
             or result.hometown
@@ -1100,6 +1295,7 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
                 }
             )
         )
+        collect_resume(pool, edited, request.candidate_id)
 
         def visible_entries(items: list[Any]) -> list[dict[str, Any]]:
             return [item.model_dump(exclude={"id", "source_text"}, mode="json") for item in items]
@@ -1234,6 +1430,9 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
             "section_order": candidate.section_order,
             "template_id": candidate.template_id,
             "custom_theme": custom_theme,
+            "line_spacing": candidate.line_spacing,
+            "section_spacing": candidate.section_spacing,
+            "field_styles": candidate.field_styles,
             "confirmed": candidate.confirmed,
             "resume_chat": candidate.resume_chat,
             "session_id": candidate_id,
@@ -1356,14 +1555,81 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
         }
 
     @application.get("/api/design/skills")
-    async def list_design_skills() -> dict[str, object]:
-        return {"skills": design_skills(), "explicit_only": True}
+    async def list_design_skills(request: Request) -> dict[str, object]:
+        owner = request.state.workspace_owner
+        installed = [
+            {"id": item["id"], "name": item["name"], "description": "已安装的排版风格"}
+            for item in installed_style_skills.get(owner, [])
+        ]
+        return {"skills": [*design_skills(), *installed], "explicit_only": True}
+
+    @application.post("/api/design/skills")
+    async def install_style_skill(request: Request, skill: StyleSkillInstallRequest) -> dict[str, object]:
+        owner = request.state.workspace_owner
+        existing = installed_style_skills.setdefault(owner, [])
+        if len(existing) >= 20:
+            raise HTTPException(status_code=400, detail="最多安装 20 个风格 Skill")
+        if bool(skill.content) == bool(skill.github_url):
+            raise HTTPException(status_code=400, detail="请选择上传文件或填写 GitHub 链接")
+        if skill.github_url:
+            from career_agent.resume.skill_install import github_skill_text
+            try:
+                name, content = await asyncio.to_thread(github_skill_text, skill.github_url)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        else:
+            name, content = skill.name or "自定义 Skill", skill.content or ""
+        if len(content.strip()) < 20:
+            raise HTTPException(status_code=400, detail="Skill 文件内容太短")
+        item = {"id": "installed-" + uuid4().hex, "name": name.strip()[:60], "content": content.strip()}
+        existing.append(item)
+        return {"id": item["id"], "name": item["name"], "description": "已安装的排版风格"}
+
+    @application.delete("/api/design/skills/{skill_id}")
+    async def remove_style_skill(skill_id: str, request: Request) -> dict[str, bool]:
+        owner = request.state.workspace_owner
+        existing = installed_style_skills.get(owner, [])
+        remaining = [item for item in existing if item["id"] != skill_id]
+        if len(remaining) == len(existing):
+            raise HTTPException(status_code=404, detail="没有找到这个 Skill")
+        installed_style_skills[owner] = remaining
+        return {"deleted": True}
+
+    @application.post("/api/design/mcp/sources")
+    async def mcp_style_sources(request: McpStyleConnectRequest) -> dict[str, object]:
+        from career_agent.resume.mcp_style import list_style_sources
+        try:
+            sources = await list_style_sources(request.url, request.token)
+        except Exception as exc:
+            logger.warning("MCP style discovery failed: %s", type(exc).__name__)
+            raise HTTPException(status_code=400, detail="MCP 连接失败，请检查公开 HTTPS 地址和凭证") from exc
+        return {"sources": sources}
+
+    @application.post("/api/design/mcp/import")
+    async def mcp_style_import(request: McpStyleImportRequest, http_request: Request) -> dict[str, str]:
+        from career_agent.resume.mcp_style import import_style_source
+        owner = http_request.state.workspace_owner
+        existing = installed_style_skills.setdefault(owner, [])
+        if len(existing) >= 20:
+            raise HTTPException(status_code=400, detail="最多安装 20 个风格 Skill")
+        try:
+            content = await import_style_source(request.url, request.token, request.kind, request.name, request.arguments)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("MCP style import failed: %s", type(exc).__name__)
+            raise HTTPException(status_code=400, detail="MCP 内容读取失败") from exc
+        if len(content) > 20_000:
+            raise HTTPException(status_code=400, detail="MCP 内容超过 20 KB")
+        item = {"id": "installed-" + uuid4().hex, "name": request.name[:60], "content": content}
+        existing.append(item)
+        return {"id": item["id"], "name": item["name"]}
 
     @application.post("/api/resume/template/design")
-    async def design_template(request: TemplateDesignRequest) -> dict[str, object]:
+    async def design_template(request: TemplateDesignRequest, http_request: Request) -> dict[str, object]:
         candidate = get_session(request.candidate_id)
         try:
-            context = explicit_design_context(request.skill_ids)
+            context = explicit_design_context(request.skill_ids, installed_style_skills.get(http_request.state.workspace_owner, []))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         service, _ = get_dependencies()
@@ -1496,6 +1762,9 @@ def create_app(*, state_file: Path | None = None) -> FastAPI:
                     photo_asset=candidate.photo_asset,
                     template_id=candidate.template_id,
                     section_order=candidate.section_order,
+                    line_spacing=candidate.line_spacing,
+                    section_spacing=candidate.section_spacing,
+                    field_styles=candidate.field_styles,
                     custom_template=(
                         candidate.custom_template if candidate.template_id == "custom" else None
                     ),

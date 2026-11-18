@@ -7,6 +7,7 @@ from PIL import Image
 
 from career_agent import CandidateIntakeDraft, EducationDraft, ExperienceDraft
 from career_agent.resume.exporter import (
+    _profile_links_text,
     inspect_docx_template,
     render_resume_docx,
     render_resume_pdf,
@@ -47,6 +48,41 @@ def test_word_export_is_a_real_readable_docx() -> None:
     assert any("张明" in paragraph.text for paragraph in paragraphs)
 
 
+def test_export_links_use_domain_labels_and_clean_urls() -> None:
+    resume = _resume().model_copy(update={"summary": "Experienced software engineer delivering applications."})
+    resume = resume.model_copy(update={"personal_info": resume.personal_info.model_copy(update={
+        "name": "ZENAN XING",
+        "links": ["LinkedIn: https://www.linkedin.com/in/demo/", "https://github.com/demo", "www.demo.cloud"],
+    })})
+    assert _profile_links_text(resume, separator="\n").splitlines() == [
+        "LinkedIn: https://www.linkedin.com/in/demo/",
+        "GitHub: https://github.com/demo",
+        "Website: https://www.demo.cloud",
+    ]
+
+
+def test_word_keeps_editable_field_formatting() -> None:
+    resume = _resume().model_copy(update={"work_experiences": [WorkExperience(
+        id="work-1", source_text="source", experience_type=ExperienceType.WORK,
+        company="Example Co", title="Engineer", description="Improved reporting.",
+    )]})
+    document = Document(BytesIO(render_resume_docx(
+        resume, template_id="classic", line_spacing=2.0,
+        field_styles={"work_experiences.0.description": {"size": 14, "bold": True, "underline": True}},
+    )))
+    paragraph = next(item for item in document.paragraphs if item.text == "Improved reporting.")
+    assert paragraph.runs[0].bold is True
+    assert paragraph.runs[0].underline is True
+    assert paragraph.runs[0].font.size.pt == 14
+    assert paragraph.paragraph_format.line_spacing == 2.0
+
+
+def test_word_section_spacing_is_configurable() -> None:
+    document = Document(BytesIO(render_resume_docx(_resume(), section_spacing=8)))
+    headings = [paragraph for paragraph in document.paragraphs if paragraph.style.name == "Heading 1"]
+    assert headings and all(paragraph.paragraph_format.space_before.pt == 6 for paragraph in headings)
+
+
 def test_pdf_export_is_a_real_pdf() -> None:
     content = render_resume_pdf(_resume(), hometown="苏州")
 
@@ -78,6 +114,40 @@ def test_visual_exports_share_browser_preview() -> None:
     assert "Sample Name" in PdfReader(BytesIO(pdf)).pages[0].extract_text()
     word = Document(BytesIO(visual_docx(pdf)))
     assert len(word.inline_shapes) == len(PdfReader(BytesIO(pdf)).pages)
+
+
+def test_visual_pdf_preserves_mixed_chinese_english_parentheses() -> None:
+    try:
+        _browser()
+    except RuntimeError:
+        pytest.skip("Chrome or Edge is not installed")
+    import pymupdf
+    title = "施耐德电气（供应链部门）Agent 开发实习"
+    preview = f'<div class="resume-paper"><h3 class="entry-primary">{title}</h3></div>'
+    pdf = visual_pdf(preview, '.resume-paper{width:794px;font-family:Arial,"Microsoft YaHei",sans-serif}')
+    assert title in pymupdf.open(stream=pdf, filetype="pdf")[0].get_text()
+
+
+def test_visual_pdf_flows_sections_without_wasting_a_page() -> None:
+    try:
+        _browser()
+    except RuntimeError:
+        pytest.skip("Chrome or Edge is not installed")
+    import pymupdf
+    from career_agent.web.app import STATIC_DIR
+
+    sections = "".join(
+        '<section class="editable-section"><div class="resume-section-title"><h2>Section</h2></div>'
+        + "".join(f'<article class="resume-entry"><p>Entry {section}-{item}.</p><p>Detailed work and results.</p></article>'
+                  for item in range(6)) + "</section>"
+        for section in range(4)
+    )
+    preview = ('<div class="resume-paper layout-banner style-aurora"><header class="resume-paper-header">'
+               '<h1>Sample Name</h1></header><div class="resume-sections">' + sections + '</div></div>')
+    pdf = visual_pdf(preview, (STATIC_DIR / "styles.css").read_text(encoding="utf-8"))
+    pages = pymupdf.open(stream=pdf, filetype="pdf")
+    assert len(pages) <= 2, [page.get_text().splitlines()[:3] + page.get_text().splitlines()[-3:] for page in pages]
+    assert "Entry 3-5." in "\n".join(page.get_text() for page in pages)
 
 
 def test_preset_layouts_change_word_structure_and_keep_pdf_downloadable() -> None:

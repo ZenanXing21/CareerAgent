@@ -131,8 +131,15 @@
               <label class="template-upload" id="template-upload-label" role="button" tabindex="0">上传自己的 Word 模板<input id="template-upload" type="file" accept=".docx"><span id="template-file-name">选择 .docx，最大 5MB</span></label>
             </div>
             <div class="editor-group">
+              <p class="section-kicker">阅读间距</p>
+              <label class="spacing-control" for="resume-line-spacing">正文行距 <output id="resume-line-spacing-value">1.85 倍</output></label>
+              <input id="resume-line-spacing" type="range" min="1.4" max="2.4" step="0.05" value="1.85" aria-label="简历正文行距">
+              <label class="spacing-control" for="resume-section-spacing">模块间距 <output id="resume-section-spacing-value">18 像素</output></label>
+              <input id="resume-section-spacing" type="range" min="6" max="48" step="2" value="18" aria-label="简历模块间距">
+            </div>
+            <div class="editor-group">
               <p class="section-kicker">编辑提示</p>
-              <p class="editor-help">点击简历中的文字即可修改。鼠标放到大标题上，整块内容会高亮；按住标题即可拖动模块。</p>
+              <p class="editor-help">点击简历文字即可修改；文字旁的工具条可调整当前字段字号、加粗和下划线。左侧可调整正文行距。按住模块标题可拖动排序。</p>
               <button class="secondary-button full-width" id="toggle-polish" type="button">查看原始输入版</button>
             </div>
           </aside>
@@ -272,6 +279,10 @@
   </div>
   <div class="toast hidden" id="toast" role="status"></div>
   <div class="resume-text-toolbar hidden" id="resume-text-toolbar" role="toolbar" aria-label="文字编辑工具">
+    <label class="toolbar-font-size">字号 <select id="field-font-size" aria-label="当前字段字号"><option value="">默认</option><option value="9">9 pt</option><option value="10.5">10.5 pt</option><option value="12">12 pt</option><option value="14">14 pt</option><option value="16">16 pt</option><option value="18">18 pt</option><option value="22">22 pt</option><option value="24">24 pt</option></select></label>
+    <label class="toolbar-font-size">行距 <select id="field-line-spacing" aria-label="简历正文行距"><option value="1.4">1.4</option><option value="1.6">1.6</option><option value="1.85">1.85</option><option value="2">2.0</option><option value="2.2">2.2</option><option value="2.4">2.4</option></select></label>
+    <button type="button" data-format-action="bold" aria-label="当前字段加粗" aria-pressed="false"><strong>B</strong></button>
+    <button type="button" data-format-action="underline" aria-label="当前字段加下划线" aria-pressed="false"><u>U</u></button>
     <button type="button" data-text-action="edit">编辑</button>
     <button type="button" data-text-action="optimize">✦ AI 优化</button>
     <button type="button" data-text-action="shorten">精简</button>
@@ -283,6 +294,14 @@
     <div class="template-agent-messages" id="template-agent-messages" aria-live="polite"><div class="agent-message assistant">告诉我你希望的风格，选择设计技能后发送。我会先给方案，等你确认再生成模板。</div></div>
     <div class="template-proposal-actions hidden" id="template-proposal-actions"><span>方案待确认</span><button class="primary-button" id="confirm-template-design" type="button">确认并生成模板</button></div>
     <div class="template-skill-picker" id="template-skill-picker" aria-label="显式选择设计技能"></div>
+    <div class="skill-install-controls">
+      <label class="skill-file-button">上传 SKILL.md<input id="style-skill-file" type="file" accept=".md,text/markdown,text/plain"></label>
+      <form id="style-skill-url-form"><input id="style-skill-url" type="url" placeholder="粘贴 GitHub Skill 链接" aria-label="GitHub Skill 链接" required><button type="submit">安装</button></form>
+      <details class="mcp-style-connector"><summary>连接外部 MCP 服务器</summary>
+        <form id="mcp-style-connect-form"><input id="mcp-style-url" type="url" placeholder="https://…/mcp" aria-label="MCP 服务器地址" required><input id="mcp-style-token" type="password" placeholder="访问令牌（如需要）" aria-label="MCP 访问令牌" autocomplete="off"><button type="submit">连接并查看内容</button></form>
+        <form id="mcp-style-import-form" class="hidden"><label for="mcp-style-source">选择工具或文本资源</label><select id="mcp-style-source" required></select><small id="mcp-style-schema"></small><textarea id="mcp-style-arguments" rows="3" placeholder="工具参数 JSON，例如 {}" aria-label="MCP 工具参数">{}</textarea><button type="submit">运行所选工具并安装风格</button></form>
+      </details>
+    </div>
     <form id="template-agent-form"><textarea id="template-agent-input" rows="2" maxlength="3000" placeholder="描述想要的风格，或回复“确认”…" required></textarea><button class="primary-button" type="submit">发送</button></form>
   </aside>
   <template id="experience-template">

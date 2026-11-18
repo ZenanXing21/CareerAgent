@@ -6,6 +6,8 @@ from career_agent.resume.editor import (
     preserve_unrequested_resume_facts,
 )
 from career_agent.resume.models import CampusExperience
+from career_agent.resume.models import WorkExperience, ExperienceType
+from career_agent.resume.profile_links import link_label, link_url
 
 
 def _resume():
@@ -52,6 +54,26 @@ def test_website_can_be_moved_before_github_without_repeating_urls() -> None:
     ]
 
 
+def test_labeled_links_become_clean_urls_with_correct_english_labels() -> None:
+    resume = _resume()
+    resume = resume.model_copy(update={"personal_info": resume.personal_info.model_copy(update={
+        "links": ["LinkedIn: https://www.linkedin.com/in/demo/", "GitHub https://github.com/demo", "www.demo.cloud"]
+    })})
+    updated, _ = apply_explicit_profile_edits(resume, "第一个个人网站名字改成LinkedIn")
+    assert updated.personal_info.links == [
+        "https://www.linkedin.com/in/demo/", "https://github.com/demo", "https://www.demo.cloud"
+    ]
+    assert [link_label(link, english=True) for link in updated.personal_info.links] == [
+        "LinkedIn", "GitHub", "Website"
+    ]
+    assert link_url("LinkedIn: https://www.linkedin.com/in/demo/") == updated.personal_info.links[0]
+
+
+def test_explicit_english_name_replaces_resume_name() -> None:
+    updated, _ = apply_explicit_profile_edits(_resume(), "英文名字改成 ZENAN XING")
+    assert updated.personal_info.name == "ZENAN XING"
+
+
 def test_agent_correction_renames_campus_heading_without_changing_entry() -> None:
     resume = _resume().model_copy(update={"campus_experiences": [CampusExperience(
         id="campus_001", source_text="参与求职助手推广",
@@ -92,6 +114,30 @@ def test_unrelated_agent_edit_does_not_erase_existing_sections_or_links() -> Non
     assert restored.campus_experiences == source.campus_experiences
     assert restored.personal_info.links == source.personal_info.links
     assert restored.personal_info.location == source.personal_info.location
+
+
+def test_agent_edit_keeps_unrelated_manual_text_even_if_model_rewrites_it() -> None:
+    source = _resume().model_copy(update={"summary": "My manually edited summary."})
+    proposed = source.model_copy(update={"summary": "Old AI summary."})
+    updated = preserve_unrequested_resume_facts(source, proposed, "请修改教育经历")
+    assert updated.summary == "My manually edited summary."
+
+
+def test_local_request_cannot_rewrite_other_entry_in_same_section() -> None:
+    source = _resume().model_copy(update={"work_experiences": [
+        WorkExperience(id="a", source_text="A", experience_type=ExperienceType.WORK,
+                       company="Schneider Electric", title="Engineer", description="My manually corrected A."),
+        WorkExperience(id="b", source_text="B", experience_type=ExperienceType.WORK,
+                       company="Huawei", title="Developer", description="My manually corrected B."),
+    ]})
+    proposed = source.model_copy(update={"work_experiences": [
+        source.work_experiences[0].model_copy(update={"description": "Rewritten A.", "title": "Wrong title"}),
+        source.work_experiences[1].model_copy(update={"description": "Old AI text for B."}),
+    ]})
+    updated = preserve_unrequested_resume_facts(source, proposed, "只精简 Schneider Electric 这段工作经历的职责")
+    assert updated.work_experiences[0].description == "Rewritten A."
+    assert updated.work_experiences[0].title == "Engineer"
+    assert updated.work_experiences[1] == source.work_experiences[1]
 
 
 def test_explicit_removal_of_a_section_is_respected() -> None:

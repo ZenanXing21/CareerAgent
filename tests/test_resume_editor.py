@@ -1,5 +1,13 @@
 from career_agent import CandidateIntakeDraft, EducationDraft, ExperienceDraft
 from career_agent.resume.editor import confirm_user_edited_resume, normalize_section_order
+from career_agent.resume.formatting import requested_section_removal
+
+
+def test_remove_named_experience_section_without_matching_education_or_work() -> None:
+    assert requested_section_removal("你帮我把经历那一块全删了吧") == "experience"
+    assert requested_section_removal("删除项目经历整个模块") == "experience"
+    assert requested_section_removal("删除教育经历") is None
+    assert requested_section_removal("工作经历不要删") is None
 
 
 def test_user_edits_become_source_preserving_confirmed_facts() -> None:

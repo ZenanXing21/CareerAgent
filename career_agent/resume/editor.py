@@ -6,6 +6,7 @@ import re
 from urllib.parse import urlsplit
 
 from career_agent.resume.models import Resume, Skill
+from career_agent.resume.profile_links import link_url
 
 SECTION_KEYS = ("summary", "education", "work", "internship", "experience", "campus", "skills")
 SECTION_LABELS = {
@@ -13,6 +14,20 @@ SECTION_LABELS = {
     "internship": "实习经历", "experience": "经历", "campus": "校园经历",
     "skills": "专业技能",
 }
+
+
+def space_numbered_points(resume: Resume) -> Resume:
+    """Keep model-produced numbered points on separate editable lines."""
+    def spaced(value: str | None) -> str | None:
+        if not value:
+            return value
+        return re.sub(r"(?<!\n)\s+(?=(?:[1-9]|[1-9][0-9])[.．、]\s*)", "\n", value)
+
+    updates = {}
+    for field in ("educations", "work_experiences", "internships", "project_experiences", "campus_experiences"):
+        updates[field] = [item.model_copy(update={"description": spaced(item.description)}) for item in getattr(resume, field)]
+    updates["summary"] = spaced(resume.summary)
+    return resume.model_copy(update=updates)
 
 
 def preserve_unrequested_resume_facts(
@@ -28,6 +43,12 @@ def preserve_unrequested_resume_facts(
             instruction,
         ))
 
+    broad_edit = bool(re.search(
+        r"(?:整份|整个|整篇|全文|通篇)\s*(?:简历|内容)|(?:全部|所有)\s*(?:栏目|模块|内容|经历)|"
+        r"(?:whole|entire)\s+resume|all sections",
+        instruction[:160], re.I,
+    ))
+
     profile_labels = {
         "name": "姓名|名字", "email": "邮箱|邮件", "phone": "手机|电话",
         "location": "所在地|现居城市|所在城市", "hometown": "籍贯|老家",
@@ -37,7 +58,9 @@ def preserve_unrequested_resume_facts(
     for field, labels in profile_labels.items():
         before = getattr(current.personal_info, field)
         after = getattr(proposed.personal_info, field)
-        if before and not after and not requested_removal(labels):
+        if (before and not after and not requested_removal(labels)) or (
+            not broad_edit and not re.search(labels, instruction, re.I)
+        ):
             profile_updates[field] = before
     resume_updates = {}
     if profile_updates:
@@ -56,8 +79,57 @@ def preserve_unrequested_resume_facts(
     for field, labels in collections.items():
         before = getattr(current, field)
         after = getattr(proposed, field)
-        if before and not after and not requested_removal(labels):
+        mentions_entry = isinstance(before, list) and any(
+            (name := getattr(item, key, None)) and len(name) >= 3 and name.casefold() in instruction.casefold()
+            for item in before for key in ("company", "school", "organization", "name", "title")
+        )
+        targeted_removal = requested_removal(labels) or (mentions_entry and re.search(removal, instruction))
+        if (before and not after and not targeted_removal) or (
+            not broad_edit and not re.search(labels, instruction, re.I) and not mentions_entry
+        ):
             resume_updates[field] = before
+        elif (not broad_edit and field not in {"skills", "summary"} and
+              isinstance(before, list) and isinstance(after, list)):
+            identity_fields = ("company", "school", "organization", "name", "title")
+            named_ids = {
+                item.id for item in before
+                if any((name := getattr(item, key, None)) and len(name) >= 3 and
+                       name.casefold() in instruction.casefold() for key in identity_fields)
+            }
+            proposed_by_id = {item.id: item for item in after}
+            merged = []
+            for item in before:
+                proposed_item = proposed_by_id.get(item.id)
+                targeted = not named_ids or item.id in named_ids
+                if proposed_item is None:
+                    if targeted and targeted_removal:
+                        continue
+                    merged.append(item)
+                    continue
+                if not targeted:
+                    merged.append(item)
+                    continue
+                allowed = {
+                    "description": r"职责|描述|内容|要点|经历|项目|工作|精简|改写|扩写|翻译|优化|润色|补充|增加|新增",
+                    "company": r"公司|企业|单位|机构|名称",
+                    "school": r"学校|大学|院校|名称",
+                    "organization": r"组织|社团|机构|名称",
+                    "name": r"名称|项目名|经历名",
+                    "title": r"岗位|职位|职务|头衔",
+                    "role": r"角色|岗位|职位|职务",
+                    "major": r"专业",
+                    "degree": r"学历|学位",
+                    "start_date": r"时间|日期|起始|开始",
+                    "end_date": r"时间|日期|结束|截止",
+                    "technologies": r"技术|技能|工具",
+                    "project_type": r"项目类型|类别",
+                }
+                updates = {key: getattr(proposed_item, key) for key, pattern in allowed.items()
+                           if hasattr(item, key) and re.search(pattern, instruction, re.I)}
+                merged.append(item.model_copy(update=updates))
+            if re.search(r"新增|增加|添加|补充", instruction):
+                merged.extend(item for item in after if item.id not in {old.id for old in before})
+            resume_updates[field] = merged
     return proposed.model_copy(update=resume_updates) if resume_updates else proposed
 
 
@@ -90,12 +162,14 @@ def apply_explicit_profile_edits(resume: Resume, instruction: str) -> tuple[Resu
     """Keep unambiguous contact facts even if a model puts them only in its explanation."""
 
     urls = []
-    for match in re.findall(r"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+", instruction):
-        url = match.rstrip(".,;:)")
+    for match in re.findall(r"(?:https?://|www\.)[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+", instruction):
+        url = link_url(match)
         parsed = urlsplit(url)
         if parsed.netloc and "." in parsed.netloc:
             urls.append(url)
-    links = list(resume.personal_info.links)
+    links = ([link_url(value) for value in resume.personal_info.links]
+             if re.search(r"网站|链接|GitHub|LinkedIn|https?://|www\.", instruction, re.I)
+             else list(resume.personal_info.links))
     if urls:
         links = list(dict.fromkeys([*urls, *links]))
     if re.search(r"(?:网站|个人主页).{0,16}(?:最前|前面|前边)", instruction):
@@ -113,7 +187,12 @@ def apply_explicit_profile_edits(resume: Resume, instruction: str) -> tuple[Resu
 
     city = explicit_place("所在地|所在城市|现居城市")
     hometown = explicit_place("籍贯|老家")
+    english_name = re.search(
+        r"(?:英文名(?:字)?|English name)\s*(?:改成|改为|换成|写成|是|为|:|：)\s*"
+        r"([A-Za-z][A-Za-z .'-]{1,58}?)(?=[，。；;\n]|$)", instruction, re.IGNORECASE,
+    )
     info = resume.personal_info.model_copy(update={
+        "name": english_name.group(1).strip() if english_name else resume.personal_info.name,
         "links": links,
         "location": city or resume.personal_info.location,
         "hometown": hometown or resume.personal_info.hometown,

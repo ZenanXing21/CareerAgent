@@ -82,6 +82,9 @@ def render_resume_docx(
     custom_template: bytes | None = None,
     custom_theme: dict | None = None,
     section_overrides: dict[str, list[str]] | None = None,
+    line_spacing: float = 1.85,
+    section_spacing: int = 18,
+    field_styles: dict[str, dict] | None = None,
 ) -> bytes:
     theme = _theme(template_id, custom_template, custom_theme)
     document = _document_from_template(custom_template)
@@ -92,10 +95,11 @@ def render_resume_docx(
         margin = 0.62 if theme.compact else 0.72
         section.top_margin = Inches(margin)
         section.bottom_margin = Inches(margin)
-        section.left_margin = Inches(0.78)
-        section.right_margin = Inches(0.78)
+        section.left_margin = Inches(0.73)
+        section.right_margin = Inches(0.73)
 
     _configure_word_styles(document, theme)
+    document.styles["Normal"].paragraph_format.line_spacing = line_spacing
     photo = _photo_bytes(photo_asset)
     content = document
     visual_style = _visual_style(theme)
@@ -106,38 +110,67 @@ def render_resume_docx(
         table.columns[1].width = Inches(4.95)
         _word_cell_color(table.cell(0, 0), "102E51" if visual_style == "blueprint" else "E8F0EF")
         _word_identity(
-            table.cell(0, 0), resume, hometown, photo, theme, inverse=visual_style == "blueprint"
+            table.cell(0, 0), resume, hometown, photo, theme, inverse=visual_style == "blueprint", field_styles=field_styles
         )
         content = table.cell(0, 1)
     elif theme.layout == "banner":
         table = document.add_table(rows=1, cols=2 if photo else 1)
+        table.rows[0].height = Inches(1.85)
+        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_CELL_VERTICAL_ALIGNMENT
+        table.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+        for cell in table.rows[0].cells:
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         _word_cell_color(table.cell(0, 0), "0B2444" if visual_style == "aurora" else theme.accent)
-        _word_identity(table.cell(0, 0), resume, hometown, None, theme, inverse=True)
+        _word_identity(table.cell(0, 0), resume, hometown, None, theme, inverse=True, field_styles=field_styles)
         if photo:
             _word_cell_color(
                 table.cell(0, 1), "0B2444" if visual_style == "aurora" else theme.accent
             )
             table.cell(0, 1).add_paragraph().add_run().add_picture(photo, width=Inches(0.72))
-        document.add_paragraph().paragraph_format.space_after = Pt(2)
+        document.add_paragraph().paragraph_format.space_after = Pt(12)
     else:
-        _word_identity(document, resume, hometown, photo, theme)
+        _word_identity(document, resume, hometown, photo, theme, field_styles=field_styles)
 
-    for heading, entries in _resume_sections(resume, section_order, section_overrides):
+    for section_key, heading, entries in _resume_sections(resume, section_order, section_overrides):
         heading_paragraph = content.add_paragraph(style="Heading 1")
-        heading_paragraph.add_run(_safe_text(heading))
+        heading_paragraph.paragraph_format.space_before = Pt(section_spacing * 0.75)
+        _style_word_run(heading_paragraph.add_run(_safe_text(heading)), field_styles, f"section_titles.{section_key}")
         _word_heading_rule(heading_paragraph, theme.accent)
-        for entry_title, description in entries:
+        collection = {"education": "educations", "work": "work_experiences", "internship": "internships", "experience": "project_experiences", "campus": "campus_experiences"}.get(section_key)
+        primary = {"education": "school", "work": "company", "internship": "company", "experience": "name", "campus": "organization"}.get(section_key)
+        secondary = {"education": "major", "work": "title", "internship": "title", "experience": "role", "campus": "role"}.get(section_key)
+        for entry_index, (entry_title, description) in enumerate(entries):
             for index, title_line in enumerate(entry_title.splitlines()):
                 paragraph = content.add_paragraph()
                 paragraph.paragraph_format.space_after = Pt(2)
-                paragraph.add_run(_safe_text(title_line)).bold = index == 0
+                run = paragraph.add_run(_safe_text(title_line))
+                run.bold = index == 0
+                run.font.size = Pt(11.25 if index == 0 else 9.4)
+                style_path = "summary" if section_key == "summary" else "__skills__" if section_key == "skills" else f"{collection}.{entry_index}.{primary if index == 0 else secondary}" if collection and (primary if index == 0 else secondary) else None
+                if style_path:
+                    _style_word_run(run, field_styles, style_path)
+                if index:
+                    run.font.color.rgb = RGBColor.from_string("52616D")
             if description:
                 for line in description.splitlines():
                     if not line.strip():
                         continue
-                    detail = content.add_paragraph(_safe_text(line))
-                    detail.paragraph_format.left_indent = Inches(0.08)
-                    detail.paragraph_format.space_after = Pt(3 if not theme.compact else 2)
+                    detail = content.add_paragraph()
+                    style_path = f"{collection}.{entry_index}.description" if collection else None
+                    terms = (field_styles or {}).get(style_path or "", {}).get("emphasis", [])
+                    import re
+                    pieces = re.split("(" + "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True)) + ")", line, flags=re.I) if terms else [line]
+                    for piece in pieces:
+                        if not piece:
+                            continue
+                        run = detail.add_run(_safe_text(piece))
+                        if style_path:
+                            _style_word_run(run, field_styles, style_path)
+                        if any(piece.casefold() == term.casefold() for term in terms):
+                            run.bold = True
+                    detail.paragraph_format.left_indent = Inches(0)
+                    detail.paragraph_format.space_after = Pt(5 if not theme.compact else 2)
+                    detail.paragraph_format.line_spacing = line_spacing
 
     output = BytesIO()
     document.save(output)
@@ -245,7 +278,7 @@ def render_resume_pdf(
         image = Image(photo, width=18 * mm, height=24 * mm)
         image.hAlign = "RIGHT"
         story.extend((image, Spacer(1, 3 * mm)))
-    for heading, entries in _resume_sections(resume, section_order, section_overrides):
+    for _, heading, entries in _resume_sections(resume, section_order, section_overrides):
         story.append(Paragraph(escape(_safe_text(heading)), heading_style))
         for entry_title, description in entries:
             story.append(Paragraph("<br/>".join(escape(_safe_text(line)) for line in entry_title.splitlines()), entry_style))
@@ -406,9 +439,9 @@ def _configure_word_styles(document: Document, theme: ResumeTheme) -> None:
         style.font.bold = bold
         style.font.color.rgb = RGBColor.from_string(color)
         style._element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), theme.east_asia_font)
-    document.styles["Normal"].paragraph_format.line_spacing = 1.25
-    document.styles["Heading 1"].paragraph_format.space_before = Pt(12)
-    document.styles["Heading 1"].paragraph_format.space_after = Pt(5)
+    document.styles["Normal"].paragraph_format.line_spacing = 1.35
+    document.styles["Heading 1"].paragraph_format.space_before = Pt(18)
+    document.styles["Heading 1"].paragraph_format.space_after = Pt(9)
 
 
 def _visual_style(theme: ResumeTheme) -> str:
@@ -425,10 +458,12 @@ def _word_identity(
     theme: ResumeTheme,
     *,
     inverse: bool = False,
+    field_styles: dict[str, dict] | None = None,
 ) -> None:
     title = container.add_paragraph(style="Title")
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER if theme.title_centered else WD_ALIGN_PARAGRAPH.LEFT
     title_run = title.add_run(_safe_text(resume.personal_info.name or "个人简历"))
+    _style_word_run(title_run, field_styles, "personal_info.name")
     if inverse:
         title_run.font.color.rgb = RGBColor(255, 255, 255)
     contact = container.add_paragraph(_safe_text(_contact_text(resume, hometown)))
@@ -524,17 +559,30 @@ def _contact_text(resume: Resume, hometown: str | None) -> str:
 
 
 def _profile_links_text(resume: Resume, *, separator: str = " · ") -> str:
+    from career_agent.resume.language import english_resume
+    from career_agent.resume.profile_links import link_label, link_url
+
     return separator.join(
-        f"{'GitHub' if 'github.com' in link.casefold() else '个人网站'}：{link}"
+        f"{link_label(link, english=english_resume(resume))}: {link_url(link)}"
         for link in resume.personal_info.links
     )
+
+
+def _style_word_run(run: object, styles: dict[str, dict] | None, path: str) -> None:
+    style = (styles or {}).get(path, {})
+    if style.get("size"):
+        run.font.size = Pt(float(style["size"]))
+    if style.get("bold"):
+        run.bold = True
+    if style.get("underline"):
+        run.underline = True
 
 
 def _resume_sections(
     resume: Resume,
     section_order: list[str] | None,
     section_overrides: dict[str, list[str]] | None = None,
-) -> Iterable[tuple[str, list[tuple[str, str]]]]:
+) -> Iterable[tuple[str, str, list[tuple[str, str]]]]:
     sections: dict[str, tuple[str, list[tuple[str, str]]]] = {}
     if resume.summary:
         sections["summary"] = ("个人总结", [(resume.summary, "")])
@@ -609,7 +657,7 @@ def _resume_sections(
     for key in normalize_section_order(section_order or []):
         if key in sections:
             heading, entries = sections[key]
-            yield section_title(resume, key, heading), entries
+            yield key, section_title(resume, key, heading), entries
 
 
 def _dates(start: str | None, end: str | None) -> str:

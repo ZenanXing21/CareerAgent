@@ -57,15 +57,20 @@ def design_skills() -> list[dict[str, str]]:
     return available
 
 
-def explicit_design_context(skill_ids: list[str]) -> str:
-    allowed = {item["id"] for item in design_skills()}
+def explicit_design_context(skill_ids: list[str], installed: list[dict[str, str]] | None = None) -> str:
+    installed = installed or []
+    allowed = {item["id"] for item in design_skills()} | {item["id"] for item in installed}
     if not skill_ids:
         raise ValueError("请明确选择要调用的设计技能")
     if any(skill not in allowed for skill in skill_ids):
         raise ValueError("未找到所选设计技能")
     root = Path(__file__).resolve().parents[2] / ".agents" / "skills"
+    installed_by_id = {item["id"]: item for item in installed}
     return "\n\n".join(
-        f"EXPLICIT_SKILL: {skill}\n" + (root / skill / "SKILL.md").read_text(encoding="utf-8")
+        f"EXPLICIT_SKILL: {skill}\n" + (
+            installed_by_id[skill]["content"] if skill in installed_by_id
+            else (root / skill / "SKILL.md").read_text(encoding="utf-8")
+        )
         for skill in dict.fromkeys(skill_ids)
     )
 
