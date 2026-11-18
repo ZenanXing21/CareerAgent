@@ -36,6 +36,7 @@ def visual_pdf(preview_html: str, stylesheet: str) -> bytes:
             + "\n@page{size:794px 1122px;margin:0}html,body{width:794px;margin:0;padding:0;background:#fff!important}"
               ".resume-paper{width:794px!important;max-width:none!important;min-height:0!important;margin:0!important;"
               "box-shadow:none!important;break-after:auto!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}"
+              ".resume-paper,.resume-paper *{font-family:'Noto Sans CJK SC','Microsoft YaHei',Arial,sans-serif!important}"
               ".resume-paper:not(.layout-sidebar) .entry-heading{display:flex!important}"
               ".resume-paper:not(.layout-banner):not(.layout-sidebar){padding:36px 46px 32px!important}"
               ".resume-paper.layout-banner .resume-paper-header{min-height:132px!important;padding:22px 44px 18px!important}"

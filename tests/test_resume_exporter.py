@@ -128,6 +128,25 @@ def test_visual_pdf_preserves_mixed_chinese_english_parentheses() -> None:
     assert title in pymupdf.open(stream=pdf, filetype="pdf")[0].get_text()
 
 
+def test_visual_pdf_preserves_chinese_in_secondary_text() -> None:
+    try:
+        _browser()
+    except RuntimeError:
+        pytest.skip("Chrome or Edge is not installed")
+    import pymupdf
+    from career_agent.web.app import STATIC_DIR
+
+    subtitle = "供应链部门 Agent 开发实习"
+    preview = ('<div class="resume-paper layout-banner"><div class="resume-sections">'
+               f'<span class="entry-secondary">{subtitle}</span></div></div>')
+    pdf = visual_pdf(preview, (STATIC_DIR / "styles.css").read_text(encoding="utf-8"))
+    page = pymupdf.open(stream=pdf, filetype="pdf")[0]
+    assert subtitle in page.get_text()
+    font_names = {span["font"] for block in page.get_text("dict")["blocks"]
+                  if "lines" in block for line in block["lines"] for span in line["spans"]}
+    assert len(font_names) == 1, font_names
+
+
 def test_visual_pdf_flows_sections_without_wasting_a_page() -> None:
     try:
         _browser()

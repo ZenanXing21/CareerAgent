@@ -54,12 +54,23 @@ def preserve_unrequested_resume_facts(
         "location": "所在地|现居城市|所在城市", "hometown": "籍贯|老家",
         "links": "网站|个人主页|GitHub|链接",
     }
+    link_label_request = bool(re.search(
+        r"(?:个人网站|网站|链接|GitHub|LinkedIn).{0,12}(?:名字|名称|标题|改名)",
+        instruction, re.I,
+    ))
+    explicit_person_name = bool(re.search(
+        r"(?:我的|本人|简历(?:上的|里)?|英文|中文)\s*(?:姓名|名字)|(?:姓名|英文名|中文名)",
+        instruction, re.I,
+    ))
     profile_updates = {}
     for field, labels in profile_labels.items():
         before = getattr(current.personal_info, field)
         after = getattr(proposed.personal_info, field)
+        mentioned = bool(re.search(labels, instruction, re.I))
+        if field == "name" and link_label_request and not explicit_person_name:
+            mentioned = False
         if (before and not after and not requested_removal(labels)) or (
-            not broad_edit and not re.search(labels, instruction, re.I)
+            not broad_edit and not mentioned
         ):
             profile_updates[field] = before
     resume_updates = {}
@@ -90,6 +101,10 @@ def preserve_unrequested_resume_facts(
             resume_updates[field] = before
         elif (not broad_edit and field not in {"skills", "summary"} and
               isinstance(before, list) and isinstance(after, list)):
+            adding_new_entry = bool(re.search(
+                r"(?:新增|增加|添加|补充)(?:一[个条段项份]|新的|新)?(?:.{0,8})(?:经历|项目|实习)|"
+                r"(?:经历|项目|实习).{0,8}(?:新增|增加|添加|补充)", instruction,
+            ))
             identity_fields = ("company", "school", "organization", "name", "title")
             named_ids = {
                 item.id for item in before
@@ -100,7 +115,7 @@ def preserve_unrequested_resume_facts(
             merged = []
             for item in before:
                 proposed_item = proposed_by_id.get(item.id)
-                targeted = not named_ids or item.id in named_ids
+                targeted = (not named_ids or item.id in named_ids) and not adding_new_entry
                 if proposed_item is None:
                     if targeted and targeted_removal:
                         continue
