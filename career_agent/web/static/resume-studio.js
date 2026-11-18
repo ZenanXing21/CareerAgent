@@ -137,12 +137,16 @@
     if (!activeField?.isConnected) return;
     const selection = window.getSelection();
     if (selection?.rangeCount && activeField.contains(selection.anchorNode) && activeField.contains(selection.focusNode)) {
-      selectedTerm = selection.toString().trim();
+      const text = selection.toString().trim();
+      if (text) selectedTerm = text;
     }
   });
   document.addEventListener("click", (event) => {
     const node = event.target.closest("#resume-editor .editable");
-    if (node) requestAnimationFrame(() => showToolbar(node, event));
+    if (node) {
+      if (!window.getSelection()?.toString().trim()) selectedTerm = "";
+      requestAnimationFrame(() => showToolbar(node, event));
+    }
     else if (!event.target.closest("#resume-text-toolbar")) hideToolbar();
   });
   document.addEventListener("pointerout", (event) => {
@@ -198,7 +202,8 @@
         const exists = terms.some(term => term.toLocaleLowerCase() === selectedTerm.toLocaleLowerCase());
         updateFieldStyle(activeField, {[key]: exists ? terms.filter(term => term.toLocaleLowerCase() !== selectedTerm.toLocaleLowerCase()) : [...terms, selectedTerm]});
         event.target.closest(`[data-format-action="${formatAction}"]`).setAttribute("aria-pressed", String(!exists));
-        selectedTerm = "";
+        // Rendering the new <u>/<strong> nodes collapses the browser selection.
+        // Keep the term so a second click reverses the same formatting.
         return;
       }
       const next = !Boolean((state.fieldStyles[activeField.dataset.path] || {})[formatAction]);

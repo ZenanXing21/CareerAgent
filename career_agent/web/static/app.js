@@ -1295,10 +1295,10 @@ window.addEventListener("pagehide", () => {
   commitAllResumeFields();
   const changed = JSON.stringify(currentResume()) !== before;
   if (changed) resumeEditVersion += 1;
-  if (changed || resumeSaveTimer) {
-    try { localStorage.setItem(resumeDraftKey(), JSON.stringify(resumePayload())); }
-    catch { /* The server save remains the primary copy. */ }
-  }
+  // A request can still be in flight after the debounce timer has fired.
+  // Always leave a recoverable copy for the next page load.
+  try { localStorage.setItem(resumeDraftKey(), JSON.stringify(resumePayload())); }
+  catch { /* The server save remains the primary copy. */ }
 });
 function scheduleResumeSave() {
   resumeEditVersion += 1;
@@ -1310,6 +1310,12 @@ async function saveResume(endpoint = "/api/resume/edit") {
   clearTimeout(resumeSaveTimer);
   resumeSaveTimer = null;
   if (!currentResume()) return;
+  const before = JSON.stringify(currentResume());
+  commitAllResumeFields();
+  if (JSON.stringify(currentResume()) !== before) {
+    resumeEditVersion += 1;
+    try { localStorage.setItem(resumeDraftKey(), JSON.stringify(resumePayload())); } catch { /* Continue saving to the server. */ }
+  }
   $("#save-state").textContent = "正在保存…";
   const version = resumeEditVersion;
   const payload = JSON.stringify(resumePayload());
@@ -1318,7 +1324,7 @@ async function saveResume(endpoint = "/api/resume/edit") {
   try {
     const result = await resumeSavePromise;
     if (version === resumeEditVersion && savedCandidateId === state.candidateId) {
-      localStorage.removeItem(resumeDraftKey());
+      if (localStorage.getItem(resumeDraftKey()) === payload) localStorage.removeItem(resumeDraftKey());
       $("#save-state").textContent = endpoint.endsWith("confirm") ? "已确认" : "已自动保存";
     }
     return result;
